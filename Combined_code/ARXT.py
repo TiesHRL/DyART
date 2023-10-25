@@ -27,9 +27,9 @@ def preprocessing(data, method):
     flag_n = False
     flag_diff = False
     flag_dec = False
-    if method is 'normalization':
+    if method == 'normalization':
         flag_n = True
-    elif method is 'differencing':
+    elif method == 'differencing':
         flag_diff = True
             
     for i in range(data.shape[1]):
@@ -468,7 +468,7 @@ def time_series_pred(data, max_p, preprocessing_method, max_depth, min_size):
     hit_rate_ART_list = []
 
     for p in p_set:
-            print("tree model with {} lags".format(p))
+            # print("tree model with {} lags".format(p))
             train=[]
             valid=[]
             for ind in range(len(ts_train)):
@@ -502,7 +502,7 @@ def time_series_pred(data, max_p, preprocessing_method, max_depth, min_size):
                     prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
                     valid_prediction.append(prediction_temp[0])
                 valid_window = comb_val[i][1:]
-            if preprocessing_method is 'differencing':
+            if preprocessing_method == 'differencing':
                 train_s = pd.Series(ts_train[idx], copy=True).cumsum()
                 last_value_train= pd.Series.tolist(train_s)[-1]
                 valid_prediction_temp = [0]*(len(valid_prediction)+1)
@@ -513,7 +513,7 @@ def time_series_pred(data, max_p, preprocessing_method, max_depth, min_size):
                 valid_prediction_list_cumsum.append(valid_prediction_cumsum)
                         
                 
-            if preprocessing_method is 'normalization':
+            if preprocessing_method == 'normalization':
                 valid_prediction_list.append(valid_prediction[:max_len])
                 valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
                 d_val_mean = ts_param[idx][2]
@@ -522,16 +522,16 @@ def time_series_pred(data, max_p, preprocessing_method, max_depth, min_size):
                 valid_prediction_list_cumsum.append(valid_prediction_denorm)
 
 
-    if preprocessing_method is 'differencing':
+    if preprocessing_method == 'differencing':
         d_val_cumsum = np.array(ts_valid[idx]).cumsum()
-    elif preprocessing_method is 'normalization':
+    elif preprocessing_method == 'normalization':
         d_val_mean = ts_param[idx][2]
         d_val_std = ts_param[idx][3]
         d_val_cumsum = (d_val[:max_len] * d_val_std) + d_val_mean
     else:
         d_val_cumsum = d_val[:max_len]
     
-    for i in max_p:
+    for i in range(max_p):
         hit_rate_ART_list.append(hit_rate(d_val_cumsum, valid_prediction_list_cumsum[i]))
 
         rmse_ART_list.append(sqrt(mean_squared_error(d_val_cumsum, valid_prediction_list_cumsum[i])))

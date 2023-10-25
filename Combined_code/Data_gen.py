@@ -19,9 +19,10 @@ def collect_data(tickers):
 
     data = fetch_financial_data(tickers)
     data_filled = data.fillna(method='ffill')
-
-    cols = ['^GSPC'] + [col for col in data_filled if col != '^GSPC']
-    data_filled = data_filled[cols]
-    data_filled.columns = range(len(data_filled.columns))
+    if isinstance(data_filled, pd.DataFrame):
+            
+        cols = ['^GSPC'] + [col for col in data_filled if col != '^GSPC']
+        data_filled = data_filled[cols]
+        data_filled.columns = range(len(data_filled.columns))
 
     return data_filled
