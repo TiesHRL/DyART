@@ -134,3 +134,43 @@ def online_changepoint_detection(data, hazard_function, log_likelihood_class):
         maxes[t] = R[:, t].argmax()
 
     return R, maxes
+
+class OnlineChagepoint():
+    def __init__(self, data, hazard_function, log_likelihood_class):
+        self.maxes = np.zeros(len(data) + 1)
+        self.data = data
+        self.R = np.zeros((len(data) + 1, len(data) + 1))
+        self.R[0, 0] = 1
+        self.hazard_function = hazard_function
+        self.log_likelihood_class = log_likelihood_class
+
+    def iteration(self, t):
+
+        x = self.data[t]
+        # Evaluate the predictive distribution for the new datum under each of
+        # the parameters.  This is the standard thing from Bayesian inference.
+        predprobs = self.log_likelihood_class.pdf(x)
+
+        # Evaluate the hazard function for this interval
+        H = self.hazard_function(np.array(range(t + 1)))
+
+        # Evaluate the growth probabilities - shift the probabilities down and to
+        # the right, scaled by the hazard function and the predictive
+        # probabilities.
+        self.R[1 : t + 2, t + 1] = self.R[0 : t + 1, t] * predprobs * (1 - H)
+
+        # Evaluate the probability that there *was* a changepoint and we're
+        # accumulating the mass back down at r = 0.
+        self.R[0, t + 1] = np.sum(self.R[0 : t + 1, t] * predprobs * H)
+
+        # Renormalize the run length probabilities for improved numerical
+        # stability.
+        self.R[:, t + 1] = self.R[:, t + 1] / np.sum(self.R[:, t + 1])
+
+        # Update the parameter sets for each possible run length.
+        self.log_likelihood_class.update_theta(x, t=t)
+
+        if self.R[0, t + 1] > 0.5:
+            return True
+        else:
+            return False

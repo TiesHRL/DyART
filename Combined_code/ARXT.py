@@ -5,13 +5,12 @@ from numpy.linalg import det, inv
 from scipy.special import gamma
 from math import pi, ceil
 from scipy.special import erfinv
-from sklearn.metrics import mean_squared_error
+
 from statsmodels.tsa.arima.model import ARIMA
 # from statsmodels.tsa import SARIMAX
 from statsmodels.tsa.seasonal import seasonal_decompose
 from random import randint
 import warnings
-from sklearn.metrics import mean_squared_error
 from math import sqrt, log
 from numpy.linalg import lstsq
 import networkx as nx
@@ -137,7 +136,6 @@ class AutoregressiveTree:
             div = 0.00001
         Wt_inv = (1 / div) * WN
         return ut, Wt_inv
-
     def param(self, target, exog):
         # Construct the data matrix (X) using the provided lags
         self.test = {'tar' : target, 'exog' :exog}
@@ -147,6 +145,8 @@ class AutoregressiveTree:
         X = np.hstack([np.ones((data.shape[0], 1)), data[:, 1:]])
         y = data[:,0]
         self.target, self.exog = y, data
+
+        # Estimate coefficients using OLS
         coeffs, residuals, rank, s = lstsq(X, y, rcond=None)
         if residuals.size == 0:
             residuals = np.sum((y - X.dot(coeffs))**2)
@@ -345,10 +345,6 @@ class AutoregressiveTree:
                             if new_score > b_score:
                                 b_index, b_value, b_score, b_groups, var, split_data = index, value, new_score, groups, ("x"+str(j)+str(index)), data
             j += 1
-        # print({'index':b_index, 'variable': var, 'value':b_value, 'groups':b_groups})
-        # print(var, b_score, bb_score)
-        # print(np.asarray(data).shape)
-        # self.exog = exog
         return {'index':b_index, 'variable': var, 'value':b_value, 'groups':b_groups, 'split_data':split_data}
     # turns a group of points, belonging to one datagroup into a terminal node, calculates the parameters for that specific group
     def to_terminal(self, target, exog):
@@ -409,8 +405,8 @@ class AutoregressiveTree:
             print('%s[%s < %.3f]' % ((depth*' ', (node['variable']), node['value'])))
             # print(depth)
             # print(node)
-            self.print_tree(node['left'], depth+1)
             self.print_tree(node['right'], depth+1)
+            self.print_tree(node['left'], depth+1)
     
         else:
             output = """{} [var: {}
@@ -448,78 +444,65 @@ class AutoregressiveTree:
             else:
                 return node['right']
 
+
 def hit_rate(ts_true, ts_pred):
     diff_true = np.diff(ts_true)
     diff_pred = np.diff(ts_pred)
     return np.sum(np.sign(diff_true) == np.sign(diff_pred)) / len(diff_true)
 
-def time_series_pred(data, max_p, preprocessing_method, max_depth, min_size):
+def time_series_pred(data, p, preprocessing_method, max_depth, min_size):
     ts_train, ts_valid, ts_test, ts_param = preprocessing(data, method=preprocessing_method)
-    p_set = [i for i in range(1,max_p+1)]
-    valid_prediction_list = []
-    valid_prediction_list_cumsum = []
-    #   Example
+    
     idx = 0
     d_val = np.array(ts_valid)[0]
-    max_len = len(d_val) - max_p
-    d_test = ts_test[0]
-    tree_list = []
-    rmse_ART_list = []
-    hit_rate_ART_list = []
+    max_len = len(d_val) - p
+    train=[]
+    valid=[]
+    for ind in range(len(ts_train)):
+        s, l = ts_train[ind], ts_valid[ind]
+        full = np.append(s,l)
+        temp = []
+        temp_valid = []
+        for i in range(len(full)-(p+1)):
+            if i < len(s)-(p+1):
+                temp.append(full[i:i + p + 1])
+            else:
+                temp_valid.append(full[i:i + p + 1])
+        train.append(temp)
+        valid.append(temp_valid)
+    d = train[0]
+    d_exog = train[1:]
 
-    for p in p_set:
-            # print("tree model with {} lags".format(p))
-            train=[]
-            valid=[]
-            for ind in range(len(ts_train)):
-                s, l = ts_train[ind], ts_valid[ind]
-                full = np.append(s,l)
-                temp = []
-                temp_valid = []
-                for i in range(len(full)-(p+1)):
-                    if i < len(s)-(p+1):
-                        temp.append(full[i:i + p + 1])
-                    else:
-                        temp_valid.append(full[i:i + p + 1])
-                train.append(temp)
-                valid.append(temp_valid)
-            d = train[0]
-            d_exog = train[1:]
+    comb = np.concatenate(train, axis=1)
+    comb_val = np.concatenate(valid, axis=1)
 
-            comb = np.concatenate(train, axis=1)
-            comb_val = np.concatenate(valid, axis=1)
+    ART = AutoregressiveTree(p)
+    tree = ART.build_tree(d, d_exog, max_depth, min_size)
 
-            ART = AutoregressiveTree(p)
-            tree = ART.build_tree(d, d_exog, max_depth, min_size)
-            tree_list.append(tree)
+    valid_prediction = []
+    valid_window = comb_val[p-1][1:]
 
-            valid_prediction = []
-            valid_window = comb_val[p-1][1:]
-
-            for i in range(len(comb_val)):
-                if i >= p:
-                    parameters = ART.predict(tree, valid_window)
-                    prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
-                    valid_prediction.append(prediction_temp[0])
-                valid_window = comb_val[i][1:]
-            if preprocessing_method == 'differencing':
-                train_s = pd.Series(ts_train[idx], copy=True).cumsum()
-                last_value_train= pd.Series.tolist(train_s)[-1]
-                valid_prediction_temp = [0]*(len(valid_prediction)+1)
-                valid_prediction_temp[1:] = valid_prediction
-                valid_prediction_temp[0] = last_value_train
-                valid_prediction_temp = pd.Series(valid_prediction_temp, copy=True)
-                valid_prediction_cumsum = valid_prediction_temp.cumsum()
-                valid_prediction_list_cumsum.append(valid_prediction_cumsum)
-                        
-                
-            if preprocessing_method == 'normalization':
-                valid_prediction_list.append(valid_prediction[:max_len])
-                valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
-                d_val_mean = ts_param[idx][2]
-                d_val_std = ts_param[idx][3]
-                valid_prediction_denorm= (valid_prediction * d_val_std) + d_val_mean
-                valid_prediction_list_cumsum.append(valid_prediction_denorm)
+    for i in range(len(comb_val)):
+        if i >= p:
+            parameters = ART.predict(tree, valid_window)
+            prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
+            valid_prediction.append(prediction_temp[0])
+        valid_window = comb_val[i][1:]
+    if preprocessing_method == 'differencing':
+        train_s = pd.Series(ts_train[idx], copy=True).cumsum()
+        last_value_train= pd.Series.tolist(train_s)[-1]
+        valid_prediction_temp = [0]*(len(valid_prediction)+1)
+        valid_prediction_temp[1:] = valid_prediction
+        valid_prediction_temp[0] = last_value_train
+        valid_prediction_temp = pd.Series(valid_prediction_temp, copy=True)
+        valid_prediction_cumsum = valid_prediction_temp.cumsum()             
+        
+    if preprocessing_method == 'normalization':
+        valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
+        d_val_mean = ts_param[idx][2]
+        d_val_std = ts_param[idx][3]
+        valid_prediction_denorm= (valid_prediction * d_val_std) + d_val_mean
+        valid_prediction_cumsum = (valid_prediction_denorm)
 
 
     if preprocessing_method == 'differencing':
@@ -530,12 +513,7 @@ def time_series_pred(data, max_p, preprocessing_method, max_depth, min_size):
         d_val_cumsum = (d_val[:max_len] * d_val_std) + d_val_mean
     else:
         d_val_cumsum = d_val[:max_len]
-    
-    for i in range(max_p):
-        hit_rate_ART_list.append(hit_rate(d_val_cumsum, valid_prediction_list_cumsum[i]))
-
-        rmse_ART_list.append(sqrt(mean_squared_error(d_val_cumsum, valid_prediction_list_cumsum[i])))
 
         
-    return d_val_cumsum, valid_prediction_list_cumsum, tree_list, hit_rate_ART_list, rmse_ART_list
+    return d_val_cumsum, valid_prediction_cumsum, tree
 

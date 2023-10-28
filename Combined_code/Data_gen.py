@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Function to fetch financial data
-def fetch_financial_data(tickers, start_date='2000-01-01', end_date='2013-10-10'):
+def fetch_financial_data(tickers, start_date='2000-01-01', end_date='2022-12-31'):
     data = yf.download(tickers, start=start_date, end=end_date)
     return data['Close']
 
@@ -24,5 +24,5 @@ def collect_data(tickers):
         cols = ['^GSPC'] + [col for col in data_filled if col != '^GSPC']
         data_filled = data_filled[cols]
         data_filled.columns = range(len(data_filled.columns))
-
+    # data_filled = data_filled.pct_change(1)
     return data_filled
