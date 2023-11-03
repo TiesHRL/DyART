@@ -34,50 +34,47 @@ def preprocessing(data, method):
     for i in range(data.shape[1]):
 
         temp = list(data.iloc[6:][i].dropna())
-        # print(temp)
-        if len(temp) > 130:
+        cut_off_1 = ceil(len(temp)*0.7)
+        cut_off_2 = ceil(len(temp)*0.9)
+
+        temp_train = temp[:cut_off_1]
+        temp_val = temp[cut_off_1:cut_off_2]
+        temp_test = temp[cut_off_2:]
+
+        if flag_n is True:
+            ts_param.append([np.mean(temp_train), np.std(temp_train), np.mean(temp_val), 
+            np.std(temp_val), np.mean(temp_test), np.std(temp_test)])
             
-            cut_off_1 = ceil(len(temp)*0.7)
-            cut_off_2 = ceil(len(temp)*0.9)
+            temp_train = (temp_train - np.mean(temp_train)) / np.std(temp_train)
+            ts_train.append(temp_train)
+            
 
-            temp_train = temp[:cut_off_1]
-            temp_val = temp[cut_off_1:cut_off_2]
-            temp_test = temp[cut_off_2:]
+            temp_val = (temp_val - np.mean(temp_val)) / np.std(temp_val)
+            ts_valid.append(temp_val)
 
-            if flag_n is True:
-                ts_param.append([np.mean(temp_train), np.std(temp_train), np.mean(temp_val), 
-                np.std(temp_val), np.mean(temp_test), np.std(temp_test)])
-                
-                temp_train = (temp_train - np.mean(temp_train)) / np.std(temp_train)
-                ts_train.append(temp_train)
-                
+            temp_test = (temp_test - np.mean(temp_test)) / np.std(temp_test)
+            ts_test.append(temp_test)
+            
 
-                temp_val = (temp_val - np.mean(temp_val)) / np.std(temp_val)
-                ts_valid.append(temp_val)
+        elif flag_diff is True:
 
-                temp_test = (temp_test - np.mean(temp_test)) / np.std(temp_test)
-                ts_test.append(temp_test)
-                
+            temp_train_diff = [temp_train[i] - temp_train[i - 1] for i in range(1, len(temp_train))]
+            temp_train_diff = [temp_train[0]] + temp_train_diff
+            ts_train.append(temp_train_diff)
 
-            elif flag_diff is True:
+            temp_val_diff = [temp_val[i] - temp_val[i - 1] for i in range(1, len(temp_val))]
+            temp_val_diff = [temp_val[0]] + temp_val_diff
+            ts_valid.append(temp_val_diff)
 
-                temp_train_diff = [temp_train[i] - temp_train[i - 1] for i in range(1, len(temp_train))]
-                temp_train_diff = [temp_train[0]] + temp_train_diff
-                ts_train.append(temp_train_diff)
-
-                temp_val_diff = [temp_val[i] - temp_val[i - 1] for i in range(1, len(temp_val))]
-                temp_val_diff = [temp_val[0]] + temp_val_diff
-                ts_valid.append(temp_val_diff)
-
-                temp_test_diff = [temp_test[i] - temp_test[i - 1] for i in range(1, len(temp_test))]
-                temp_test_diff = [temp_test[0]] + temp_test_diff
-                ts_test.append(temp_test_diff)
+            temp_test_diff = [temp_test[i] - temp_test[i - 1] for i in range(1, len(temp_test))]
+            temp_test_diff = [temp_test[0]] + temp_test_diff
+            ts_test.append(temp_test_diff)
                 
     return ts_train, ts_valid, ts_test, ts_param
 
 class AutoregressiveTree:
     
-    def __init__(self, p, u0=0, alpha_u=1, X=None):
+    def __init__(self, p, u0=0, alpha_u=1, X=None, splt="target"):
         self._X = X  # Exogenous data
         
         erf_temp = np.zeros([7,1])
@@ -93,6 +90,7 @@ class AutoregressiveTree:
         self.target = []
         self.exog = []
         self.test = {}
+        self.splt = splt
     #  calculate the sample mean of the data (could be a vector), maybe split into sample mean of each variable
     def sample_mean(self, data):
         # print(sum(data), len(data))
@@ -313,38 +311,39 @@ class AutoregressiveTree:
                             b_index, b_value, b_score, b_groups, var, split_data = index, value, new_score, groups, ("y"+str(index)), data
         j = 0
         bb_score = 1
-        for ex in train_exog:
-            # print(j)
-            self.exog = ex
-            avg = np.mean(ex, axis=0)
-            min_e = np.min(ex, axis=0)
-            max_e = np.max(ex, axis=0)
-            self.target = avg
-            bb_score =  max(bb_score, self.LeafScore(ex))
-            # print(avg)
-            sigma = np.std(ex, axis=0)
-            for index in range(len(avg)):
-                for i in range(len(self._erf)):
-                    value = avg[index] + sigma[index] * self._erf[i]
-                    if value <= min_e[index] or value >= max_e[index]:
-                        continue
-                    # groups = self.test_split(index, value, ex)
-                    data = self.rest_split(index, value, train, train_exog,"y", j)
-                    if data is None or data[2][j] is None or data[3][j] is None:
-                        # print("NONE TYPE")
-                        continue
-                    self.target = train
-                    self.exog = train_exog
-                    groups = data[2][j], data[3][j]
+        if self.splt == "exog":
+            for ex in train_exog:
+                # print(j)
+                self.exog = ex
+                avg = np.mean(ex, axis=0)
+                min_e = np.min(ex, axis=0)
+                max_e = np.max(ex, axis=0)
+                self.target = avg
+                bb_score =  max(bb_score, self.LeafScore(ex))
+                # print(avg)
+                sigma = np.std(ex, axis=0)
+                for index in range(len(avg)):
+                    for i in range(len(self._erf)):
+                        value = avg[index] + sigma[index] * self._erf[i]
+                        if value <= min_e[index] or value >= max_e[index]:
+                            continue
+                        # groups = self.test_split(index, value, ex)
+                        data = self.rest_split(index, value, train, train_exog,"y", j)
+                        if data is None or data[2][j] is None or data[3][j] is None:
+                            # print("NONE TYPE")
+                            continue
+                        self.target = train
+                        self.exog = train_exog
+                        groups = data[2][j], data[3][j]
+                        
+                        new_score = 1
+                        for group in groups:
+                            if len(group) >1:
+                                new_score *= self.LeafScore(group)
                     
-                    new_score = 1
-                    for group in groups:
-                        if len(group) >1:
-                            new_score *= self.LeafScore(group)
-                
-                            if new_score > b_score:
-                                b_index, b_value, b_score, b_groups, var, split_data = index, value, new_score, groups, ("x"+str(j)+str(index)), data
-            j += 1
+                                if new_score > b_score:
+                                    b_index, b_value, b_score, b_groups, var, split_data = index, value, new_score, groups, ("x"+str(j)+str(index)), data
+                j += 1
         return {'index':b_index, 'variable': var, 'value':b_value, 'groups':b_groups, 'split_data':split_data}
     # turns a group of points, belonging to one datagroup into a terminal node, calculates the parameters for that specific group
     def to_terminal(self, target, exog):
@@ -450,7 +449,7 @@ def hit_rate(ts_true, ts_pred):
     diff_pred = np.diff(ts_pred)
     return np.sum(np.sign(diff_true) == np.sign(diff_pred)) / len(diff_true)
 
-def time_series_pred(data, p, preprocessing_method, max_depth, min_size):
+def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, splt="exog"):
     ts_train, ts_valid, ts_test, ts_param = preprocessing(data, method=preprocessing_method)
     
     idx = 0
@@ -476,7 +475,7 @@ def time_series_pred(data, p, preprocessing_method, max_depth, min_size):
     comb = np.concatenate(train, axis=1)
     comb_val = np.concatenate(valid, axis=1)
 
-    ART = AutoregressiveTree(p)
+    ART = AutoregressiveTree(p, splt=splt)
     tree = ART.build_tree(d, d_exog, max_depth, min_size)
 
     valid_prediction = []
@@ -501,7 +500,7 @@ def time_series_pred(data, p, preprocessing_method, max_depth, min_size):
         valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
         d_val_mean = ts_param[idx][2]
         d_val_std = ts_param[idx][3]
-        valid_prediction_denorm= (valid_prediction * d_val_std) + d_val_mean
+        valid_prediction_denorm = (valid_prediction * d_val_std) + d_val_mean
         valid_prediction_cumsum = (valid_prediction_denorm)
 
 
@@ -516,4 +515,63 @@ def time_series_pred(data, p, preprocessing_method, max_depth, min_size):
 
         
     return d_val_cumsum, valid_prediction_cumsum, tree
+
+def forecast(data, tree, ART, p):
+    
+    ts_param = [np.mean(data, axis=0), np.std(data, axis=0)]
+    temp_data = (data - np.mean(data, axis=0)) / np.std(data, axis=0)
+    d = []
+    for ind in range(temp_data.shape[1]):
+        full = temp_data[ind]
+        d.append(full[-p-1:].iloc[::-1])
+    for_val = np.concatenate(d)
+    parameters = ART.predict(tree, for_val[1:])
+    prediction = np.dot(for_val[1:][:,np.newaxis].T,parameters[1]) + parameters[2]  
+    prediction_temp = prediction[0]*ts_param[1] + ts_param[0]
+    return prediction_temp[0], prediction[0]
+
+class AR_p:
+    def __init__(self,  data, p):
+        self.data = data
+        self.p = p
+        self.lagged_data = self.gen_lagged_data(data)
+        self.m = 0 
+        self.coeffs = []
+
+    def gen_lagged_data(self, data):
+        d = []
+        for ind in range(data.shape[1]):
+            temp_data = data[ind]
+            temp = []
+            for i in range(len(temp_data)-(self.p+1)):
+                temp.append(temp_data[i:i + self.p])
+            d.append(temp)
+        data = np.concatenate(d, axis = 1)
+        return(data)
+
+        
+    def AR_p_model(self, data):
+
+        data = self.lagged_data
+        # Add intercept term (column of ones) to X
+        X = np.hstack([np.ones((data.shape[0], 1)), data[:, 1:]])
+        y = data[:,0]
+
+        # Estimate coefficients using OLS
+        coeffs, residuals, rank, s = lstsq(X, y, rcond=None)
+        self.coeffs = coeffs[1:]
+        if residuals.size == 0:
+            residuals = np.sum((y - X.dot(coeffs))**2)
+        self.m = [coeffs[0]]
+    
+    def predict(self, data):
+
+        d = []
+        for ind in range(data.shape[1]):
+            full = data[ind]
+            d.append(full[-self.p:].iloc[::-1])
+        for_val = np.concatenate(d)
+        prediction = np.dot(for_val[1:][:,np.newaxis].T,self.coeffs) + self.m  
+
+        return(prediction[0])
 
