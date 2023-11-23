@@ -84,6 +84,7 @@ class AutoregressiveTree:
         self._erf = erf_temp
         self._p = p
         self._alpha_W = p + 2
+        self.len_data = 0
 
         self._u0 = u0
         self._alpha_u = alpha_u
@@ -350,10 +351,10 @@ class AutoregressiveTree:
         outcomes = self.param(target,exog)
         return outcomes
     # this recursivelky builds the tree up. If the node should be a terminal node make terminal, else use get split to find next best split
-    def split(self, node, max_depth, min_size, depth):
+    def split(self, node, max_depth, min_size, depth, max_weight):
         left_t, right_t, left_e, right_e = node['split_data']
         left, right = node['groups']
-
+        frac_l, frac_r = len(left)/self.len_data, len(right)/self.len_data
         del(node['groups'])
         if not left or not right:
             node['left'] = node['right'] = self.to_terminal(left_t + right_t, left_e + right_e)
@@ -362,7 +363,9 @@ class AutoregressiveTree:
         if depth >= max_depth:
             node['left'], node['right'] = self.to_terminal(left_t,left_e ), self.to_terminal(right_t, right_e)
             return
-        
+        if frac_l >= max_weight or frac_r >= max_weight:
+            node['left'], node['right'] = self.to_terminal(left_t,left_e ), self.to_terminal(right_t, right_e)
+            return
         if len(left) <= min_size:
             node['left'] = self.to_terminal(left_t, left_e)
         else:
@@ -381,9 +384,8 @@ class AutoregressiveTree:
             else:
                 self.split(node['right'], max_depth, min_size, depth+1)
     # initiates the buiilding process. Finds initial split and if there are no effective splits then makes source node a terminal node
-    def build_tree(self, train, train_exog, max_depth, min_size):
-        train=train
-        train_exog = train_exog
+    def build_tree(self, train, train_exog, max_depth, min_size, max_weight):
+        self.len_data = len(train)
         root = self.get_split(train, train_exog)
         if root['groups'] is None:
             root['root'] = self.to_terminal(train,train_exog)
@@ -392,7 +394,7 @@ class AutoregressiveTree:
             del(root['groups'])
         else:
             # print(root['index'])
-            self.split(root, max_depth, min_size, 1)
+            self.split(root, max_depth, min_size, 1, max_weight)
         
         return root
     # prints the tree structure 
@@ -449,7 +451,7 @@ def hit_rate(ts_true, ts_pred):
     diff_pred = np.diff(ts_pred)
     return np.sum(np.sign(diff_true) == np.sign(diff_pred)) / len(diff_true)
 
-def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, splt="exog"):
+def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, max_weight, splt="exog"):
     ts_train, ts_valid, ts_test, ts_param = preprocessing(data, method=preprocessing_method)
     
     idx = 0
@@ -476,7 +478,7 @@ def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, sp
     comb_val = np.concatenate(valid, axis=1)
 
     ART = AutoregressiveTree(p, splt=splt)
-    tree = ART.build_tree(d, d_exog, max_depth, min_size)
+    tree = ART.build_tree(d, d_exog, max_depth, min_size, max_weight)
 
     valid_prediction = []
     valid_window = comb_val[p-1][1:]
@@ -528,7 +530,7 @@ def forecast(data, tree, ART, p):
     parameters = ART.predict(tree, for_val[1:])
     prediction = np.dot(for_val[1:][:,np.newaxis].T,parameters[1]) + parameters[2]  
     prediction_temp = prediction[0]*ts_param[1] + ts_param[0]
-    return prediction_temp[0], prediction[0]
+    return prediction_temp[0]
 
 class AR_p:
     def __init__(self,  data, p):

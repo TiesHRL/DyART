@@ -54,8 +54,8 @@ def ARXT_tree(splt):
     # Define hyperparameter bounds
     pbounds = {
         "p": (5, 20),
-        "max_depth":(10, 25),
-        "min_size":(10, 30)
+        "max_depth":(10, 100),
+        "min_size":(1, 30)
     }
     opt_params = optimizer(pbounds, 0 , train_len, splt)
     opt_params = {"max_depth": 21.46, "min_size": 21.52, "p": 5.903}
@@ -70,12 +70,13 @@ def ARXT_tree(splt):
     log_likelihood_class = c_det.warm_run(llc = online_ll.StudentT(alpha=0.1, beta=.01, kappa=1, mu=0),t = train_len)
     Nw = 200
     forecasts = []
-    
+    retraining_points = []
     for i in range(train_len, len(DATA[0])):
         forecasts.append(ARXT.forecast(DATA.iloc[i-200:i], tree, ART, p))
 
         if c_det.iteration(i, log_likelihood_class, Nw):
             print("retraining at ", DATA.index[i])
+            retraining_points.append(DATA.index[i])
             opt_params = optimizer(next_pbounds, i-500, i, splt)
             p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
             next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
@@ -85,26 +86,16 @@ def ARXT_tree(splt):
             _, _, tree, _, _ = train_run_tree(data=DATA[i-600:i], p=p, max_depth=max_depth, min_size=min_size, splt=splt)
 
     pd.DataFrame(forecasts).to_csv("forecasts_{}.csv".format(splt))
+    pd.DataFrame(retraining_points).to_csv("retraining_points.csv".format(splt))
 
     plt.plot(DATA.iloc[train_len:,0], label="truth")
     plt.plot(forecasts, label="forecasts")
     plt.legend()
     plt.show()
+    return forecasts, retraining_points
 
 def AR_model(p):
     train_len = 1000
-    # Define hyperparameter bounds
-    pbounds = {
-        "p": (5, 20),
-        "max_depth":(10, 25),
-        "min_size":(10, 30)
-    }
-    # opt_params = optimizer(pbounds, 0 , train_len, "target")
-    # opt_params = {"max_depth": 21.46, "min_size": 21.52, "p": 5.903}
-
-    # p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
-    # next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
-
     AR = ARXT.AR_p(DATA, p)    
 
     AR.AR_p_model(train_len)
@@ -112,24 +103,16 @@ def AR_model(p):
     for i in range(train_len, len(DATA[0])):
         forecasts.append(AR.predict(DATA[i-p:i]))
 
-        # if c_det.iteration(i, log_likelihood_class, Nw):
-        #     print("retraining at ", DATA.index[i])
-        #     opt_params = optimizer(next_pbounds, i-500, i, splt)
-        #     p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
-        #     next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
-
-        #     ART = ARXT.AutoregressiveTree(p, splt=splt)    
-    
-        #     _, _, tree, _, _ = train_run_tree(data=DATA[i-600:i], p=p, max_depth=max_depth, min_size=min_size, splt=splt)
-
-    pd.DataFrame(forecasts).to_csv("forecasts_AR.csv")
-
     plt.plot(DATA.iloc[train_len:,0], label="truth")
     plt.plot(forecasts, label="forecasts")
     plt.legend()
     plt.show()
+    return forecasts
 def main():
-    AR_model(5)
+    ARTX_exog = ARXT_tree("exog")
+    ARTX_target = ARXT_tree("target")
+    AR_p =  AR_model(5)
 
+    pd.DataFrame([ARTX_exog, ARTX_target, AR_p]).to_csv("results.csv")
 if __name__ == "__main__":
     main()
