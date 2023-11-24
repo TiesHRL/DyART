@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Function to fetch financial data
-def fetch_financial_data(tickers, start_date='2000-01-01', end_date='2022-12-31'):
+def fetch_financial_data(tickers, start_date='2003-01-01', end_date='2022-12-31'):
     data = yf.download(tickers, start=start_date, end=end_date)
     return data['Close']
 

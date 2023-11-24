@@ -16,7 +16,7 @@ import json
 
 def get_data():
 
-    # tickers = ["^GSPC", "^IXIC", "^DJI","JPYUSD=X", "^VIX"] # , "GBPUSD=X", "EURUSD=X",
+    # tickers = ["^GSPC", "^IXIC", "^DJI","JPYUSD=X", "^VIX", "GBPUSD=X", "EURUSD=X] # , "GBPUSD=X", "EURUSD=X",
     # data = Data_gen.collect_data(tickers)
     data = pd.read_csv("Data/fin_data.csv")
     # data.to_csv("Data/fin_data.csv")
@@ -43,13 +43,13 @@ def objective_function(p, max_depth, min_size, start, fin, splt):
 
     performance = hit_rate_sample * 2 - rmse_sample * 0.5
     return performance
-def optimizer(pbounds, start, fin, splt):
+def optimizer(pbounds, start, fin, splt, init_points=10, n_iter=20):
     optimizer = BayesianOptimization(f= lambda p, max_depth, min_size: objective_function(p, max_depth, min_size,start, fin, splt), pbounds=pbounds, random_state=1)
     acq_function = UtilityFunction(kind="ei", kappa=5, kappa_decay=0.8)
-    optimizer.maximize(init_points=2, n_iter=5, acquisition_function = acq_function)
+    optimizer.maximize(init_points, n_iter, acquisition_function = acq_function)
     opt_params  = optimizer.max['params']
     return opt_params
-def ARXT_tree(splt):
+def ARXT_tree(splt, tune):
     train_len = 1000
     # Define hyperparameter bounds
     pbounds = {
@@ -77,15 +77,17 @@ def ARXT_tree(splt):
         if c_det.iteration(i, log_likelihood_class, Nw):
             print("retraining at ", DATA.index[i])
             retraining_points.append(DATA.index[i])
-            opt_params = optimizer(next_pbounds, i-500, i, splt)
-            p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
-            next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
+            if tune:
+                opt_params = optimizer(next_pbounds, i-500, i, splt, init_points=5, n_iter = 10)
+                p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
+                next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
 
             ART = ARXT.AutoregressiveTree(p, splt=splt)    
     
             _, _, tree, _, _ = train_run_tree(data=DATA[i-600:i], p=p, max_depth=max_depth, min_size=min_size, splt=splt)
-
-    pd.DataFrame(forecasts).to_csv("forecasts_{}.csv".format(splt))
+    retrain = "retrain"
+    if tune: retrain = "retune"
+    pd.DataFrame(forecasts).to_csv("forecasts_{}_{}.csv".format(splt, retrain))
     pd.DataFrame(retraining_points).to_csv("retraining_points.csv".format(splt))
 
     plt.plot(DATA.iloc[train_len:,0], label="truth")
@@ -94,13 +96,23 @@ def ARXT_tree(splt):
     plt.show()
     return forecasts, retraining_points
 
-def AR_model(p):
+def AR_model(p, train):
     train_len = 1000
     AR = ARXT.AR_p(DATA, p)    
 
-    AR.AR_p_model(train_len)
+    AR.AR_p_model(0, train_len)
+    c_det = bayes_models.OnlineChagepoint(np.array(DATA[0]), constant_hazard, 200)
+    log_likelihood_class = c_det.warm_run(llc = online_ll.StudentT(alpha=0.1, beta=.01, kappa=1, mu=0),t = train_len)
+    Nw = 200
     forecasts = []
+    retraining_points = []
     for i in range(train_len, len(DATA[0])):
+        if train:
+            if c_det.iteration(i, log_likelihood_class, Nw):
+                print("retraining at ", DATA.index[i])
+                retraining_points.append(DATA.index[i])
+                AR.AR_p_model(max(0,i-500), i)
+
         forecasts.append(AR.predict(DATA[i-p:i]))
 
     plt.plot(DATA.iloc[train_len:,0], label="truth")
@@ -109,10 +121,15 @@ def AR_model(p):
     plt.show()
     return forecasts
 def main():
-    ARTX_exog = ARXT_tree("exog")
-    ARTX_target = ARXT_tree("target")
-    AR_p =  AR_model(5)
-
-    pd.DataFrame([ARTX_exog, ARTX_target, AR_p]).to_csv("results.csv")
+    ARTX_exog_tuned, retraining_points = ARXT_tree("exog", True)
+    ARTX_exog_trained, _ = ARXT_tree("exog", False)
+    ARTX_target_tuned, _ = ARXT_tree("target", True)
+    ARTX_target_trained, _ = ARXT_tree("target", False)
+    AR_p_trained =  AR_model(5, True)
+    AR_p =  AR_model(5, False)
+    pd.DataFrame(retraining_points).to_csv("..\\Data\\retraining_points.csv")
+    for i, forecast in enumerate([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, AR_p_trained, AR_p]):
+        pd.DataFrame(forecast).to_csv("..\\Data\\results_{}.csv".format(i))
+    pd.DataFrame([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, AR_p_trained, AR_p]).to_csv("..\\Data\\results.csv")
 if __name__ == "__main__":
     main()

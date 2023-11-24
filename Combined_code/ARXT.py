@@ -533,9 +533,9 @@ class AR_p:
         return(data)
 
         
-    def AR_p_model(self, train_len):
+    def AR_p_model(self, start, train_len):
 
-        data = self.lagged_data[:train_len]
+        data = self.lagged_data[start:train_len]
         # Add intercept term (column of ones) to X
         X = np.hstack([np.ones((data.shape[0], 1)), data[:, 1:]])
         y = data[:,0]
