@@ -26,9 +26,9 @@ def get_data():
 
     return(data)
 
-def train_run_tree(data, p, max_depth, min_size, splt):
+def train_run_tree(data, p, max_depth, min_size, max_weight, splt):
     p, max_depth, min_size =  int(round(p)), int(round(max_depth)), int(round(min_size))
-    d_val_cumsum, valid_prediction_cumsum, tree_list = ARXT.ARXT_time_series_pred(data=data, p=p, preprocessing_method='normalization', max_depth=max_depth, min_size=min_size, splt=splt)
+    d_val_cumsum, valid_prediction_cumsum, tree_list = ARXT.ARXT_time_series_pred(data=data, p=p, preprocessing_method='normalization', max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
     hit_rate_sample = hit_rate(d_val_cumsum, valid_prediction_cumsum)
 
     rmse_sample = (sqrt(mean_squared_error(d_val_cumsum, valid_prediction_cumsum)))
@@ -36,15 +36,15 @@ def train_run_tree(data, p, max_depth, min_size, splt):
     return d_val_cumsum, valid_prediction_cumsum, tree_list, hit_rate_sample, rmse_sample
 DATA = get_data()
 
-def objective_function(p, max_depth, min_size, start, fin, splt):
+def objective_function(p, max_depth, min_size, max_weight, start, fin, splt):
     # Set up and train the ART model using the hyperparameters
-    p, max_depth, min_size =  round(p), round(max_depth), round(min_size)
-    d_val_cumsum, valid_prediction_cumsum, _, hit_rate_sample, rmse_sample = train_run_tree(DATA[start:fin], p, max_depth, min_size, splt=splt)
+    p, max_depth, min_size, max_weight =  round(p), round(max_depth), round(min_size), round(max_weight)
+    d_val_cumsum, valid_prediction_cumsum, _, hit_rate_sample, rmse_sample = train_run_tree(DATA[start:fin], p, max_depth, min_size, max_weight=max_weight, splt=splt)
 
     performance = hit_rate_sample * 2 - rmse_sample * 0.5
     return performance
 def optimizer(pbounds, start, fin, splt, init_points=10, n_iter=20):
-    optimizer = BayesianOptimization(f= lambda p, max_depth, min_size: objective_function(p, max_depth, min_size,start, fin, splt), pbounds=pbounds, random_state=1)
+    optimizer = BayesianOptimization(f= lambda p, max_depth, min_size, max_weight: objective_function(p, max_depth, min_size, max_weight, start, fin, splt), pbounds=pbounds, random_state=1)
     acq_function = UtilityFunction(kind="ei", kappa=5, kappa_decay=0.8)
     optimizer.maximize(init_points, n_iter, acquisition_function = acq_function)
     opt_params  = optimizer.max['params']
@@ -55,11 +55,10 @@ def ARXT_tree(splt, tune):
     pbounds = {
         "p": (5, 20),
         "max_depth":(10, 100),
-        "min_size":(1, 30)
+        "min_size":(1, 30),
+        "max_weight": (0.01, 0.1)
     }
     opt_params = optimizer(pbounds, 0 , train_len, splt)
-    opt_params = {"max_depth": 21.46, "min_size": 21.52, "p": 5.903}
-
     p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
     next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
 
@@ -79,12 +78,12 @@ def ARXT_tree(splt, tune):
             retraining_points.append(DATA.index[i])
             if tune:
                 opt_params = optimizer(next_pbounds, i-500, i, splt, init_points=5, n_iter = 10)
-                p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
-                next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
+                p, max_depth, min_size, max_weight = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size']), round(opt_params['max_weight'])
+                next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3), "min_size" : (max(0.001, max_weight*0.7), max_weight*1.3)}
 
             ART = ARXT.AutoregressiveTree(p, splt=splt)    
     
-            _, _, tree, _, _ = train_run_tree(data=DATA[i-600:i], p=p, max_depth=max_depth, min_size=min_size, splt=splt)
+            _, _, tree, _, _ = train_run_tree(data=DATA[i-600:i], p=p, max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
     retrain = "retrain"
     if tune: retrain = "retune"
     pd.DataFrame(forecasts).to_csv("forecasts_{}_{}.csv".format(splt, retrain))
