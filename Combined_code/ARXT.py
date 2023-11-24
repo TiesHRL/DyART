@@ -96,24 +96,15 @@ class AutoregressiveTree:
         # print(sum(data), len(data))
         return sum(np.asarray(data))/len(data)
 
-    
     # calculate the scatter matrix around the mean uN
-    # def scatter_matrix(self, data, uN_):
     def scatter_matrix(self, data, uN_):
-
-        # assert data.shape[1] == p * (1 + no_exog_vars), 'Data dimensions do not match expected shape'
-        # Assuming data has been preprocessed to include lags of y and X
         temp = data - uN_
-
         SN = 0
         for row in temp:
             row = row[:, np.newaxis]
             SN += row * row.T
-        # print(len(SN),len(SN[0]))
         return SN
-    # def WN_func(self, uN_, SN, W0, N):
     def WN_func(self, uN_, SN, W0, N):
-        # assert SN.shape[0] == p * (1 + no_exog_vars), 'Scatter matrix dimensions do not match expected shape'
         temp = self._u0 - uN_
 
         # Assuming scatter matrix has been computed from preprocessed data
@@ -155,7 +146,6 @@ class AutoregressiveTree:
     # scaling function using the gamma distribution
     def c_func(self, l, alpha):
         c = 1
-        #   for loop goes from 1 to l
         for i in range(1, l + 1):
             c *= gamma((alpha + 1 - i) / 2)
         
@@ -174,10 +164,8 @@ class AutoregressiveTree:
         return pds
     def mult_func(self, l, alpha, N):
         c = 1
-        #   for loop goes from 1 to l
         for i in range(1, l + 1):
             c *= ((alpha + 1 + N - i)/(alpha + 1 - i))
-        # print(c)
         return c
 
     def pds_func2(self, N, W0, WN, u0_, N_, W0_, WN_):
@@ -202,7 +190,6 @@ class AutoregressiveTree:
         SN = self.scatter_matrix(data, uN_)
         W0 = np.identity(SN.shape[0])
         WN = self.WN_func(uN_, SN, W0, N)
-        # ut, Wt_inv = self.MAP_param(N, uN_, WN, 0)
         data_ = data[:-1]
         N_ = len(data_)
         uN_d_ = self.sample_mean(data_)
@@ -212,7 +199,6 @@ class AutoregressiveTree:
         WN_d_ = self.WN_d_func(uN_d_, SN_d_, W0_, N_)
 
         if N > 20:
-            # pds2 = self.pds_func2(N, W0, WN, u0_, N_, W0_, WN_d_)
             pds = self.pds_approx(N, W0, WN)
             pds_ = self.pds_approx(N_, W0_, WN_d_)
             pds2 = pds/pds_
@@ -296,11 +282,9 @@ class AutoregressiveTree:
             for i in range(len(self._erf)):
 
                 value = avg[index] + sigma[index] * self._erf[i]
-                # groups = self.test_split(index, value, train)
                 data = self.rest_split(index, value, train, train_exog,"n", 0)
                 groups = data[0], data[1]
                 if data is None or data[0] is None or data[1] is None:
-                    # print("NONE TYPE")
                     continue
                 new_score = 1
                 for group in groups:
@@ -313,24 +297,20 @@ class AutoregressiveTree:
         bb_score = 1
         if self.splt == "exog":
             for ex in train_exog:
-                # print(j)
                 self.exog = ex
                 avg = np.mean(ex, axis=0)
                 min_e = np.min(ex, axis=0)
                 max_e = np.max(ex, axis=0)
                 self.target = avg
                 bb_score =  max(bb_score, self.LeafScore(ex))
-                # print(avg)
                 sigma = np.std(ex, axis=0)
                 for index in range(len(avg)):
                     for i in range(len(self._erf)):
                         value = avg[index] + sigma[index] * self._erf[i]
                         if value <= min_e[index] or value >= max_e[index]:
                             continue
-                        # groups = self.test_split(index, value, ex)
                         data = self.rest_split(index, value, train, train_exog,"y", j)
                         if data is None or data[2][j] is None or data[3][j] is None:
-                            # print("NONE TYPE")
                             continue
                         self.target = train
                         self.exog = train_exog
@@ -382,8 +362,6 @@ class AutoregressiveTree:
                 self.split(node['right'], max_depth, min_size, depth+1)
     # initiates the buiilding process. Finds initial split and if there are no effective splits then makes source node a terminal node
     def build_tree(self, train, train_exog, max_depth, min_size):
-        train=train
-        train_exog = train_exog
         root = self.get_split(train, train_exog)
         if root['groups'] is None:
             root['root'] = self.to_terminal(train,train_exog)
@@ -391,7 +369,6 @@ class AutoregressiveTree:
             root['value'] = None
             del(root['groups'])
         else:
-            # print(root['index'])
             self.split(root, max_depth, min_size, 1)
         
         return root
@@ -502,7 +479,8 @@ def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, sp
         d_val_std = ts_param[idx][3]
         valid_prediction_denorm = (valid_prediction * d_val_std) + d_val_mean
         valid_prediction_cumsum = (valid_prediction_denorm)
-
+    else: 
+        valid_prediction_cumsum = valid_prediction
 
     if preprocessing_method == 'differencing':
         d_val_cumsum = np.array(ts_valid[idx]).cumsum()
