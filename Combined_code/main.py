@@ -64,7 +64,7 @@ def ARXT_tree(splt, tune):
 
     ART = ARXT.AutoregressiveTree(p, splt=splt)    
 
-    _, _, tree, _, _ = train_run_tree(data=DATA.iloc[200:train_len], p=p, max_depth=max_depth, min_size=min_size, splt=splt)
+    _, _, tree, _, _ = train_run_tree(data=DATA.iloc[200:train_len], p=p, max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
     c_det = bayes_models.OnlineChagepoint(np.array(DATA[0]), constant_hazard, 200)
     log_likelihood_class = c_det.warm_run(llc = online_ll.StudentT(alpha=0.1, beta=.01, kappa=1, mu=0),t = train_len)
     Nw = 200
