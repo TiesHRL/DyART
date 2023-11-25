@@ -21,7 +21,6 @@ warnings.filterwarnings("ignore")
 def preprocessing(data, method):
     ts_train = []
     ts_valid = []
-    ts_test = []
     ts_param = []
     flag_n = False
     flag_diff = False
@@ -35,15 +34,12 @@ def preprocessing(data, method):
 
         temp = list(data.iloc[6:][i].dropna())
         cut_off_1 = ceil(len(temp)*0.7)
-        cut_off_2 = ceil(len(temp)*0.9)
-
         temp_train = temp[:cut_off_1]
-        temp_val = temp[cut_off_1:cut_off_2]
-        temp_test = temp[cut_off_2:]
+        temp_val = temp[cut_off_1:]
 
         if flag_n is True:
             ts_param.append([np.mean(temp_train), np.std(temp_train), np.mean(temp_val), 
-            np.std(temp_val), np.mean(temp_test), np.std(temp_test)])
+            np.std(temp_val)])
             
             temp_train = (temp_train - np.mean(temp_train)) / np.std(temp_train)
             ts_train.append(temp_train)
@@ -51,10 +47,6 @@ def preprocessing(data, method):
 
             temp_val = (temp_val - np.mean(temp_val)) / np.std(temp_val)
             ts_valid.append(temp_val)
-
-            temp_test = (temp_test - np.mean(temp_test)) / np.std(temp_test)
-            ts_test.append(temp_test)
-            
 
         elif flag_diff is True:
 
@@ -65,12 +57,8 @@ def preprocessing(data, method):
             temp_val_diff = [temp_val[i] - temp_val[i - 1] for i in range(1, len(temp_val))]
             temp_val_diff = [temp_val[0]] + temp_val_diff
             ts_valid.append(temp_val_diff)
-
-            temp_test_diff = [temp_test[i] - temp_test[i - 1] for i in range(1, len(temp_test))]
-            temp_test_diff = [temp_test[0]] + temp_test_diff
-            ts_test.append(temp_test_diff)
                 
-    return ts_train, ts_valid, ts_test, ts_param
+    return ts_train, ts_valid, ts_param
 
 class AutoregressiveTree:
     
@@ -432,10 +420,10 @@ def hit_rate(ts_true, ts_pred):
     return np.sum(np.sign(diff_true) == np.sign(diff_pred)) / len(diff_true)
 
 def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, max_weight, splt="exog"):
-    ts_train, ts_valid, ts_test, ts_param = preprocessing(data, method=preprocessing_method)
+    ts_train, ts_valid, ts_param = preprocessing(data, method=preprocessing_method)
     
     idx = 0
-    d_val = np.array(ts_valid)[0]
+    d_val = np.array(ts_valid[0])
     max_len = len(d_val) - p
     train=[]
     valid=[]
