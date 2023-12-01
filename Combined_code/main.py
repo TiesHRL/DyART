@@ -14,7 +14,7 @@ from bayesian_changepoint_detection.hazard_functions import constant_hazard
 import bayesian_changepoint_detection.online_likelihoods as online_ll
 import time 
 
-def get_data():
+def get_data(differencing = False):
 
     # tickers = ["^GSPC", "^IXIC", "^DJI","JPYUSD=X", "^VIX", "GBPUSD=X", "EURUSD=X] # , "GBPUSD=X", "EURUSD=X",
     # data = Data_gen.collect_data(tickers)
@@ -23,7 +23,8 @@ def get_data():
     data.index = data["Date"]
     data = data.drop(["Date"], axis=1)
     data.columns = range(data.shape[1])
-
+    if differencing:
+        data = data.pct_change()
     return(data)
 
 def train_run_tree(data, p, max_depth, min_size, max_weight, splt):
@@ -34,7 +35,7 @@ def train_run_tree(data, p, max_depth, min_size, max_weight, splt):
     rmse_sample = (sqrt(mean_squared_error(d_val_cumsum, valid_prediction_cumsum)))
 
     return d_val_cumsum, valid_prediction_cumsum, tree_list, hit_rate_sample, rmse_sample
-DATA = get_data()
+DATA = get_data(differencing=True)
 
 def objective_function(p, max_depth, min_size, max_weight, start, fin, splt):
     # Set up and train the ART model using the hyperparameters
