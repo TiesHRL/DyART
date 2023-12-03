@@ -458,6 +458,7 @@ def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, ma
             valid_prediction.append(prediction_temp[0])
         valid_window = comb_val[i][1:]
     if preprocessing_method == 'differencing':
+        valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
         train_s = pd.Series(ts_train[idx], copy=True).cumsum()
         last_value_train= pd.Series.tolist(train_s)[-1]
         valid_prediction_temp = [0]*(len(valid_prediction)+1)
@@ -472,11 +473,9 @@ def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, ma
         d_val_std = ts_param[idx][3]
         valid_prediction_denorm = (valid_prediction * d_val_std) + d_val_mean
         valid_prediction_cumsum = (valid_prediction_denorm)
-    else: 
-        valid_prediction_cumsum = valid_prediction
 
     if preprocessing_method == 'differencing':
-        d_val_cumsum = np.array(ts_valid[idx]).cumsum()
+        d_val_cumsum = np.array(ts_valid[idx]).cumsum()[1:]
     elif preprocessing_method == 'normalization':
         d_val_mean = ts_param[idx][2]
         d_val_std = ts_param[idx][3]
@@ -501,7 +500,7 @@ def forecast(data, tree, ART, p):
     prediction_temp = prediction[0]*ts_param[1] + ts_param[0]
     return prediction_temp[0]
 
-class AR_p:
+class ARX_p:
     def __init__(self,  data, p):
         self.data = data
         self.p = p
@@ -521,7 +520,7 @@ class AR_p:
         return(data)
 
         
-    def AR_p_model(self, start, train_len):
+    def ARX_p_model(self, start, train_len):
 
         data = self.lagged_data[start:train_len]
         # Add intercept term (column of ones) to X
@@ -546,3 +545,45 @@ class AR_p:
 
         return(prediction[0])
 
+class AR_p:
+    def __init__(self,  data, p):
+        self.data = data
+        self.p = p
+        self.lagged_data = self.gen_lagged_data(data)
+        self.m = 0 
+        self.coeffs = []
+
+    def gen_lagged_data(self, data):
+        d = []
+        temp_data = data[0]
+        temp = []
+        for i in range(len(temp_data)-(self.p+1)):
+            temp.append(temp_data[i:i + self.p])
+        d.append(temp)
+        data = np.concatenate(d, axis = 1)
+        return(data)
+
+        
+    def AR_p_model(self, start, train_len):
+
+        data = self.lagged_data[start:train_len]
+        # Add intercept term (column of ones) to X
+        X = np.hstack([np.ones((data.shape[0], 1)), data[1:]])
+        y = data[:,0]
+
+        # Estimate coefficients using OLS
+        coeffs, residuals, rank, s = lstsq(X, y, rcond=None)
+        self.coeffs = coeffs[1:]
+        if residuals.size == 0:
+            residuals = np.sum((y - X.dot(coeffs))**2)
+        self.m = [coeffs[0]]
+    
+    def predict(self, data):
+
+        d = []
+        full = data[0]
+        d.append(full[-self.p:].iloc[::-1])
+        for_val = np.concatenate(d)
+        prediction = np.dot(for_val[1:][:,np.newaxis].T,self.coeffs) + self.m  
+
+        return(prediction[0])

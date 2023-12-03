@@ -5,16 +5,14 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error
 from math import sqrt
-from bayes_opt import BayesianOptimization
-from bayes_opt import UtilityFunction
+from bayes_opt import BayesianOptimization, UtilityFunction
 import matplotlib.pyplot as plt
-import logging
 import bayesian_changepoint_detection.bayesian_models as bayes_models
 from bayesian_changepoint_detection.hazard_functions import constant_hazard
 import bayesian_changepoint_detection.online_likelihoods as online_ll
 import time 
 
-def get_data():
+def get_data(differencing = False):
 
     # tickers = ["^GSPC", "^IXIC", "^DJI","JPYUSD=X", "^VIX", "GBPUSD=X", "EURUSD=X] # , "GBPUSD=X", "EURUSD=X",
     # data = Data_gen.collect_data(tickers)
@@ -23,6 +21,9 @@ def get_data():
     data.index = data["Date"]
     data = data.drop(["Date"], axis=1)
     data.columns = range(data.shape[1])
+    if differencing:
+        data = data.diff()
+        data = data.iloc[1:,:]
 
     return(data)
 
@@ -34,7 +35,7 @@ def train_run_tree(data, p, max_depth, min_size, max_weight, splt):
     rmse_sample = (sqrt(mean_squared_error(d_val_cumsum, valid_prediction_cumsum)))
 
     return d_val_cumsum, valid_prediction_cumsum, tree_list, hit_rate_sample, rmse_sample
-DATA = get_data()
+DATA = get_data(differencing=True)
 
 def objective_function(p, max_depth, min_size, max_weight, start, fin, splt):
     # Set up and train the ART model using the hyperparameters
@@ -96,15 +97,15 @@ def ARXT_tree(splt, tune):
     # plt.show()
     end_time = time.time()
     duration = end_time-start_time
-    print("Time taken for ARXT {} {}: {}".format(splt, retrain, duration))
+    print("Time taken for ARXT {} {}: {} mins".format(splt, retrain, round(duration)/60))
     return forecasts, retraining_points
 
-def AR_model(p, train):
+def ARX_model(p, train):
     start_time = time.time()
     train_len = 1000
-    AR = ARXT.AR_p(DATA, p)    
+    AR = ARXT.ARX_p(DATA, p)    
 
-    AR.AR_p_model(0, train_len)
+    AR.ARX_p_model(0, train_len)
     c_det = bayes_models.OnlineChagepoint(np.array(DATA[0]), constant_hazard, 200)
     log_likelihood_class = c_det.warm_run(llc = online_ll.StudentT(alpha=0.1, beta=.01, kappa=1, mu=0),t = train_len)
     Nw = 200
@@ -115,32 +116,56 @@ def AR_model(p, train):
             if c_det.iteration(i, log_likelihood_class, Nw):
                 print("retraining at ", DATA.index[i])
                 retraining_points.append(DATA.index[i])
-                AR.AR_p_model(max(0,i-500), i)
+                AR.ARX_p_model(max(0,i-500), i)
 
         forecasts.append(AR.predict(DATA[i-p:i]))
-
-    # plt.plot(DATA.iloc[train_len:,0], label="truth")
-    # plt.plot(forecasts, label="forecasts")
-    # plt.legend()
-    # plt.show()
     retrain = ""
     if train: retrain = "retune"
     end_time = time.time()
     duration = end_time-start_time
-    print("Time taken for AR(p) {}: {}".format(retrain, duration))
-    pd.DataFrame(forecasts).to_csv("forecasts_AR_{}.csv".format(retrain))
+    print("Time taken for AR(p) {}: {} mins".format(retrain, round(duration)/60))
+    # pd.DataFrame(forecasts).to_csv("forecasts_AR_{}.csv".format(retrain))
+
+    return forecasts
+def AR_model(p, train):
+    start_time = time.time()
+    train_len = 1000
+    forecasts = []
+    retraining_points = []
+    for i in range(train_len, len(DATA[0])- p):
+        moving_val = DATA.iloc[i-p*5:i,0]
+        model = ARIMA(moving_val, order=(p,1,0))
+        model_fit = model.fit()
+        forecasts.append(model_fit.forecast()[0])
+    end_time = time.time()
+    duration = end_time-start_time
+    print("Time taken for AR({}): {} mins".format(p, duration/60))
 
     return forecasts
 def main():
-    ARTX_exog_tuned, retraining_points = ARXT_tree("exog", True)
-    ARTX_exog_trained, _ = ARXT_tree("exog", False)
-    ARTX_target_tuned, _ = ARXT_tree("target", True)
-    ARTX_target_trained, _ = ARXT_tree("target", False)
+    # ARTX_exog_tuned, retraining_points = ARXT_tree("exog", True)
+    # ARTX_exog_trained, _ = ARXT_tree("exog", False)
+    # ARTX_target_tuned, _ = ARXT_tree("target", True)
+    # ARTX_target_trained, _ = ARXT_tree("target", False)
+    ARX_p_trained =  ARX_model(5, True)
+    ARX_p =  ARX_model(5, False)
     AR_p_trained =  AR_model(5, True)
     AR_p =  AR_model(5, False)
-    pd.DataFrame(retraining_points).to_csv("Data\\retraining_points.csv")
-    for i, forecast in enumerate([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, AR_p_trained, AR_p]):
-        pd.DataFrame(forecast).to_csv("Data\\results_{}.csv".format(i))
-    pd.DataFrame([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, AR_p_trained, AR_p]).to_csv("Data\\results.csv")
+    
+    plt.plot(DATA.iloc[1000:,0], label="truth")
+    plt.plot(ARX_p_trained, label="ARX_p_trained")
+    plt.plot(ARX_p, label="ARX_p")
+    plt.plot(AR_p, label="AR_p")
+    plt.plot(AR_p_trained, label="AR_p_trained")
+
+    plt.legend()
+    plt.show()
+    # pd.DataFrame(retraining_points).to_csv("Data\\retraining_points.csv")
+    
+    # for i, forecast in enumerate([ARX_p_trained, ARX_p, AR_p_trained, AR_p, DATA.iloc[1000:, 0]]):
+    #     pd.DataFrame(forecast).to_csv("Data\\results_{}.csv".format(i))
+    # pd.DataFrame([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, AR_p_trained, AR_p]).to_csv("Data\\results.csv")
+    pd.DataFrame([ARX_p_trained, ARX_p, AR_p_trained, AR_p, DATA.iloc[1000:, 0]]).to_csv("Data\\results_AR.csv")
+
 if __name__ == "__main__":
     main()
