@@ -22,6 +22,7 @@ This code is associated with the following blog posts:
 
 import matplotlib.pyplot as plt
 from   matplotlib.colors import LogNorm
+# from matplotlib.dates import mdates
 import numpy as np
 import pandas as pd
 from   scipy.stats import norm
@@ -149,32 +150,83 @@ def generate_data(varx, mean0, var0, T, cp_prob):
 import matplotlib.dates as mdates
 from pandas.tseries.offsets import BDay
 
-def plot_posterior(T, data, R, pmean, pvar, cps):
+# def plot_posterior(T, data, R, pmean, pvar, cps):
+#     # index = data.index[0] + data.index
+#     R = R[:-1,:-1]
+#     R = pd.DataFrame(R, index=data.index)
+#     fig, axes = plt.subplots(2, 1, figsize=(20, 10), sharex=True)
+#     ax1, ax2 = axes
+
+#     ax1.scatter(data.index, data)
+#     ax1.plot(data.index, data)
+
+
+#     # Plot predictions.
+#     ax1.plot(data.index, pmean, color='k')
+#     _2std = 2 * np.sqrt(pvar)
+#     ax1.plot(data.index, pmean - _2std, color='k', linestyle='--')
+#     ax1.plot(data.index, pmean + _2std, color='k', linestyle='--')
+#     plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+
+#     ax2.imshow(np.rot90(R), aspect='auto', cmap='gray_r', 
+#                norm=LogNorm(vmin=0.0001, vmax=1))
+#     ax2.set_xlim([0,T])
+   
+#     ax2.margins(0)
+
+#     for cp in cps:
+#         ax1.axvline(cp, c='red', ls='dotted')
+#         ax2.axvline(cp, c='red', ls='dotted')
+
+#     plt.tight_layout()
+#     plt.show()
+def plot_posterior(T, data, R, pmean, pvar, cps, dts):
+    # Assuming R is already truncated as needed and converted to a DataFrame
+    R = R[:-1,:-1]
+    dts = pd.to_datetime(dts)
+
+    R = pd.DataFrame(R, index=dts)
     
     fig, axes = plt.subplots(2, 1, figsize=(20, 10), sharex=True)
     ax1, ax2 = axes
 
-    ax1.scatter(range(0, T), data)
-    ax1.plot(range(0, T), data)
-
-    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    ax1.scatter(dts, data)
+    ax1.plot(dts, data)
 
     # Plot predictions.
-    ax1.plot(range(0, T), pmean, color='k')
+    ax1.plot(dts, pmean, color='k')
     _2std = 2 * np.sqrt(pvar)
-    ax1.plot(range(0, T), pmean - _2std, color='k', linestyle='--')
-    ax1.plot(range(0, T), pmean + _2std, color='k', linestyle='--')
-    
+    ax1.plot(dts, pmean - _2std, color='k', linestyle='--')
+    ax1.plot(dts, pmean + _2std, color='k', linestyle='--')
+    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
+    # Set x-axis ticks per year
+    ax1.xaxis.set_major_locator(mdates.YearLocator())
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+
+    dts_num = mdates.date2num(dts)
+
+    # Now use dts_num for the extent parameter
     ax2.imshow(np.rot90(R), aspect='auto', cmap='gray_r', 
-               norm=LogNorm(vmin=0.0001, vmax=1))
-    ax2.set_xlim([0, T])
-   
+            norm=LogNorm(vmin=0.0001, vmax=1), 
+            extent=[dts_num[0], dts_num[-1], 1, R.shape[0]])
+    # Rotate the matrix R by 90 degrees without flipping vertically.
+    # ax2.imshow((np.rot90(R)), aspect='auto', cmap='gray_r', 
+    #            norm=LogNorm(vmin=0.0001, vmax=1), extent=[0, T, 1, 4000])
+
+    # Set y-axis limits for ax2
+    ax2.set_ylim([1, 4000])
+
     ax2.margins(0)
-    for cp in cps:
+    changepoints = data.index[cps]
+    changepoints = mdates.date2num(changepoints)
+
+
+    for cp in changepoints:
         ax1.axvline(cp, c='red', ls='dotted')
         ax2.axvline(cp, c='red', ls='dotted')
-
 
     plt.tight_layout()
     plt.show()
@@ -203,22 +255,32 @@ def get_changepoint_indices(R, threshold=0.8, min_distance=100):
 # -----------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    data = get_data(differencing=True)[0]
     train_len = 1000
+
+    data = get_data()[0] #.pct_change(1)
+    dt_index = data.index[train_len:]
+    print(data)
+    # data = np.log1p(data.pct_change())
+    # print(data)
+
+    data = data*100
+    # data = (data - np.mean(data)) / np.std(data)
     T      = len(data)-train_len   # Number of observations.
-    hazard = 1/250  # Constant prior on changepoint probability.
+    hazard = 1/500  # Constant prior on changepoint probability.
     mean0  = np.mean(data[0:train_len])      # The prior mean on the mean parameter.
-    var0   = 5      # The prior variance for mean parameter.
-    varx   = np.std(data[0:train_len])*10     # The known variance of the data.
+    var0   = 1  # The prior variance for mean parameter.
+    varx   = np.std(data[0:train_len])   # The known variance of the data.
     data = data[train_len:]
-    
+    print(mean0, var0, varx)
+
+
     model          = GaussianUnknownMean(mean0, var0, varx)
     R, pmean, pvar = bocd(data, model, hazard)
    
-    cps = get_changepoint_indices(R)
+    cps = get_changepoint_indices(R, min_distance=250)
     changepoints = data.index[cps]
     print(changepoints)
-    pd.DataFrame(changepoints).to_csv("changepoints.csv", index=False)
-    pd.DataFrame(R).to_csv("R_mat.csv", index=False)
+    pd.DataFrame(changepoints).to_csv("Data/changepoints.csv", index=False)
+    # pd.DataFrame(R).to_csv("R_mat.csv", index=False)
     
-    plot_posterior(T, data, R, pmean, pvar, cps)
+    # plot_posterior(T, data, R, pmean, pvar, cps, dt_index)

@@ -34,4 +34,4 @@ def negative_binomial_prior(t, k: int = 1, p: float = 0.25):
         p - the prob of success
     """
 
-    return ss.nbinom.pmf(self.k, t, self.p)
+    return ss.nbinom.pmf(k, t, p)
