@@ -60,7 +60,7 @@ def preprocessing(data, method):
                 
     return ts_train, ts_valid, ts_param
 
-class AutoregressiveTree:
+class AutoregressiveXTree:
     
     def __init__(self, p, u0=0, alpha_u=1, X=None, splt="target"):
         self._X = X  # Exogenous data
@@ -412,13 +412,297 @@ class AutoregressiveTree:
                 return self.predict(node['right'], row)
             else:
                 return node['right']
+import numpy as np
+from numpy.linalg import det, inv
+from scipy.special import gamma
+from math import pi
+from scipy.special import erfinv
 
+class AutoregressiveTree:
+    
+    def __init__(self, p, u0=0, alpha_u=1):
+        
+        erf_temp = np.zeros([7,1])
+        for i in range(1,8):
+            erf_temp[i-1] = erfinv((i/4) - 1)
+        
+        self._erf = erf_temp
+        self._p = p
+        self._alpha_W = p + 2
+        self._u0 = u0
+        self._alpha_u = alpha_u
+    #  calculate the sample mean of the data (could be a vector), maybe split into sample mean of each variable
+    def sample_mean(self, data):
+        return sum(data) / len(data)
+    
+    # calculate the scatter matrix around the mean uN
+    def scatter_matrix(self, data, uN_):
+        temp = data - uN_
+        SN = 0
+        for row in temp:
+            row = row[:, np.newaxis]
+            SN += row * row.T
+        # print(len(SN),len(SN[0]))
+        return SN
+    # updates the WN matric for the autoregressive model. Involves uses mean, variance matrix original wn and length of data, the covariance matrix of the strucutre
+    def WN_func(self, uN_, SN, W0, N):
+        temp = self._u0 - uN_
+        temp = temp[:, np.newaxis]
+        WN = W0 + SN + ((self._alpha_u * N) / (self._alpha_u + N)) * np.dot(temp, temp.T)
+        return WN
+    # Updates the matrix WN_d, calculates the within node covariance matrix 
+    def WN_d_func(self, u0_, uN_d_, SN_d_, W0_, N_):
+        temp = u0_ - uN_d_
+        temp = temp[:, np.newaxis]
+        WN_ = W0_ + SN_d_ + ((self._alpha_u * N_) / (self._alpha_u + N_)) * np.dot(temp, temp.T)
+        return WN_
+    # calculating the Maximum a posteriori arameters for the ar model
+    def MAP_param(self, N, uN_, WN):
+        ut = ((self._alpha_u * self._u0) + (N * uN_)) / (self._alpha_u + N)
+        Wt_inv = (1 / (self._alpha_W + N - (self._p + 1))) * WN
+        return ut, Wt_inv
+    # calculate all of the AR parameters needed 
+    def param(self, data):
+        N = len(data)
+        uN_ = self.sample_mean(data)
+        SN = self.scatter_matrix(data, uN_)
+        W0 = np.identity(SN.shape[0])
+        WN = self.WN_func(uN_, SN, W0, N)
+        ut, Wt_inv = self.MAP_param(N, uN_, WN)
+        W = inv(Wt_inv)
+        var = 1 / W[-1, -1]
+        Wpp = inv(Wt_inv[:-1, :-1])
+        b = np.zeros([self._p, 1])
+        for j in range(len(b)):
+            for i in range(self._p):
+                b[j] += Wt_inv[-1, i] * Wpp[i, j]
+        
+        m = ut[-1]
+        for i in range(self._p):
+            m += b[i] * ut[i]
+        
+        return var, b, m[0]
+    # scaling function using the gamma distribution
+    def c_func(self, l, alpha):
+        c = 1
+        #   for loop goes from 1 to l
+        for i in range(1, l + 1):
+            c *= gamma((alpha + 1 - i) / 2)
+        
+        return c
+    # probability density scaling function used
+    def pds_func(self, N, W0, WN):
+        pds = (pi**(-((self._p + 1) * N) / 2)) + \
+        ((self._alpha_u / (self._alpha_u + N))**((self._p + 1) / 2)) + \
+        (self.c_func(self._p + 1, self._alpha_W + N) / self.c_func(self._p + 1, self._alpha_W)) * (det(W0)**(self._alpha_W / 2))*(det(WN)**(-(self._alpha_W + N) / 2))
+        return pds
+    # similiar to above just now with different params
+    def pd_s_func(self, u0_, N_, W0_, WN_):
+        pds = (pi**(-((self._p + 1) * N_) / 2)) + \
+        ((self._alpha_u / (self._alpha_u + N_))**((self._p + 1) / 2)) + \
+        (self.c_func(self._p + 1, self._alpha_W - 1 + N_) / self.c_func(self._p + 1, self._alpha_W - 1)) * (det(W0_)**((self._alpha_W - 1) / 2))*(det(WN_)**(-(self._alpha_W - 1 + N_) / 2))
+        return pds
+    # Calculates the score aof a leaf node using the above prob density's
+    def LeafScore(self, data):
+        N = len(data)
+        uN_ = self.sample_mean(data)
+        SN = self.scatter_matrix(data, uN_)
+        W0 = np.identity(SN.shape[0])
+        WN = self.WN_func(uN_, SN, W0, N)
+        ut, Wt_inv = self.MAP_param(N, uN_, WN)
+        pds = self.pds_func(N, W0, WN)
+        data_ = []
+        for x in data:
+            data_.append(x[:-1])
+        
+        N_ = len(data_)
+        uN_d_ = self.sample_mean(data_)
+        SN_d_ = self.scatter_matrix(data_, uN_d_)
+        u0_ = ut[:-1]
+        W0_ = inv(inv(W0)[:-1, :-1])
+        WN_d_ = self.WN_d_func(u0_, uN_d_, SN_d_, W0_, N_)
+        pds_ = self.pd_s_func(u0_, N_, W0_, WN_d_)
+        return pds / pds_
+    # This will spplit a dataset into two froups based on the specific features. Then splits the data points into the left or right set
+    def test_split(self, index, value, dataset):
+        left, right = list(), list()
+        for row in dataset:
+            if row[index] < value:
+                left.append(row)
+            else:
+                right.append(row)
+        return left, right
+    # itrates through the features and the values to det the best for splitting the dataset, calkculates the score for each split and choses the one with best improvement
+    def get_split(self, dataset):
+        b_index, b_value, b_groups = 999, 999, None
+        b_score = self.LeafScore(dataset)
+        avg = np.mean(dataset, axis=0)[:-1]
+        sigma = np.std(dataset, axis=0)[:-1]
+        for index in range(len(avg)):
+            for i in range(len(self._erf)):
+                value = avg[index] + sigma[index] * self._erf[i]
+                groups = self.test_split(index, value, dataset)
+                new_score = 1
+                for group in groups:
+                    if len(group) != 0:
+                        new_score *= self.LeafScore(group)
+            
+                        if new_score > b_score:
+                            b_index, b_value, b_score, b_groups = index, value, new_score, groups
+        
+        return {'index':b_index, 'value':b_value, 'groups':b_groups}
+    # turns a group of points, belonging to one datagroup into a terminal node, calculates the parameters for that specific group
+    def to_terminal(self, group):
+        outcomes = self.param(group)
+        return outcomes
+    # this recursivelky builds the tree up. If the node should be a terminal node make terminal, else use get split to find next best split
+    def split(self, node, max_depth, min_size, depth):
+        left, right = node['groups']
+        del(node['groups'])
+        if not left or not right:
+            node['left'] = node['right'] = self.to_terminal(left + right)
+            return
+        
+        if depth >= max_depth:
+            node['left'], node['right'] = self.to_terminal(left), self.to_terminal(right)
+            return
+        
+        if len(left) <= min_size:
+            node['left'] = self.to_terminal(left)
+        else:
+            node['left'] = self.get_split(left)
+            if node['left']['groups'] is None:
+                node['left'] = self.to_terminal(left)
+            else:
+                self.split(node['left'], max_depth, min_size, depth+1)
+        
+        if len(right) <= min_size:
+            node['right'] = self.to_terminal(right)
+        else:
+            node['right'] = self.get_split(right)
+            if node['right']['groups'] is None:
+                node['right'] = self.to_terminal(right)
+            else:
+                self.split(node['right'], max_depth, min_size, depth+1)
+    # initiates the buiilding process. Finds initial split and if there are no effective splits then makes source node a terminal node
+    def build_tree(self, train, max_depth, min_size):
+        root = self.get_split(train)
+        if root['groups'] is None:
+            root['root'] = self.to_terminal(train)
+            root['index'] = None
+            root['value'] = None
+            del(root['groups'])
+        else:
+            self.split(root, max_depth, min_size, 1)
+        
+        return root
+    # prints the tree structure 
+    def print_tree(self, node, depth=0):
+        if isinstance(node, dict):
+            if node['value'] is None:
+                print(node)
+                return                                                                                                                               
+            print('%s[X%d < %.3f]' % ((depth*' ', (node['index']+1), node['value'])))
+            self.print_tree(node['left'], depth+1)
+            self.print_tree(node['right'], depth+1)
+    
+        else:
+            print('%s[%s]' % ((depth*' ', node)))
+    # follows the tree strarting from root node until a terminal node is found
+    def predict(self, node, row):
+        if 'root' in node:
+            return node['root']
+        if row[node['index']] < node['value']:
+            if isinstance(node['left'], dict):
+                return self.predict(node['left'], row)
+            else:
+                return node['left']
+        else:
+            if isinstance(node['right'], dict):
+                return self.predict(node['right'], row)
+            else:
+                return node['right']
 
 def hit_rate(ts_true, ts_pred):
     diff_true = np.diff(ts_true)
     diff_pred = np.diff(ts_pred)
     return np.sum(np.sign(diff_true) == np.sign(diff_pred)) / len(diff_true)
+def ART_time_series_pred(data, p, preprocessing_method, max_depth, min_size):
+    ts_train, ts_valid, ts_param = preprocessing(data, method=preprocessing_method)
+    
+    idx = 0
+    d_val = np.array(ts_valid)[0]
+    max_len = len(d_val) - p
+    train=[]
+    valid=[]
+    for ind in range(len(ts_train)):
+        s = ts_train
+        for s in ts_train:
+            temp = []
+            for i in range(len(s) - (p + 1)):
+                temp.append(s[i:i + p + 1])
 
+            train.append(temp)
+    d = train[0]
+
+    # comb = np.concatenate(train, axis=1)
+    # comb_val = np.concatenate(valid, axis=1)
+
+    ART = AutoregressiveTree(p)
+    tree = ART.build_tree(d, max_depth, min_size)
+
+    valid_prediction = []
+    valid_window = d[p-1][1:]
+
+    for i in range(len(d_val)):
+            parameters = ART.predict(tree, valid_window)
+            prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
+            valid_prediction.append(prediction_temp[0][0])
+            valid_window = np.append(valid_window, d_val[i])
+            valid_window = valid_window[1:]
+    valid_prediction = pd.Series(valid_prediction, copy=True)
+    if preprocessing_method == 'differencing':
+        valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
+        train_s = pd.Series(ts_train[idx], copy=True).cumsum()
+        last_value_train= pd.Series.tolist(train_s)[-1]
+        valid_prediction_temp = [0]*(len(valid_prediction)+1)
+        valid_prediction_temp[1:] = valid_prediction
+        valid_prediction_temp[0] = last_value_train
+        valid_prediction_temp = pd.Series(valid_prediction_temp, copy=True)
+        valid_prediction_cumsum = valid_prediction_temp.cumsum()             
+        
+    if preprocessing_method == 'normalization':
+        valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
+        d_val_mean = ts_param[idx][2]
+        d_val_std = ts_param[idx][3]
+        valid_prediction_denorm = (valid_prediction * d_val_std) + d_val_mean
+        valid_prediction_cumsum = (valid_prediction_denorm)
+
+    if preprocessing_method == 'differencing':
+        d_val_cumsum = np.array(ts_valid[idx]).cumsum()[1:]
+    elif preprocessing_method == 'normalization':
+        d_val_mean = ts_param[idx][2]
+        d_val_std = ts_param[idx][3]
+        d_val_cumsum = (d_val[:max_len] * d_val_std) + d_val_mean
+    else:
+        d_val_cumsum = d_val[:max_len]
+
+        
+    return d_val_cumsum, valid_prediction_cumsum, tree
+
+def forecast_ART(data, tree, ART, p):
+    
+    ts_param = [np.mean(data, axis=0), np.std(data, axis=0)]
+    temp_data = (data - np.mean(data, axis=0)) / np.std(data, axis=0)
+    temp_data = temp_data[0]
+    valid_window = np.array(temp_data[-p:].iloc[::-1])
+    parameters = ART.predict(tree, valid_window)
+    prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
+    d_val_mean = ts_param[0][2]
+    d_val_std = ts_param[0][3]
+    prediction_temp = (prediction_temp * d_val_std) + d_val_mean
+
+    return prediction_temp[0]
 def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, max_weight, splt="exog"):
     ts_train, ts_valid, ts_param = preprocessing(data, method=preprocessing_method)
     
@@ -445,15 +729,15 @@ def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, ma
     comb = np.concatenate(train, axis=1)
     comb_val = np.concatenate(valid, axis=1)
 
-    ART = AutoregressiveTree(p, splt=splt)
-    tree = ART.build_tree(d, d_exog, max_depth, min_size, max_weight)
+    ARXT = AutoregressiveXTree(p, splt=splt)
+    tree = ARXT.build_tree(d, d_exog, max_depth, min_size, max_weight)
 
     valid_prediction = []
     valid_window = comb_val[p-1][1:]
 
     for i in range(len(comb_val)):
         if i >= p:
-            parameters = ART.predict(tree, valid_window)
+            parameters = ARXT.predict(tree, valid_window)
             prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
             valid_prediction.append(prediction_temp[0])
         valid_window = comb_val[i][1:]
