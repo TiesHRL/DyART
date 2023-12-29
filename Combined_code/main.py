@@ -129,6 +129,7 @@ def ART_tree(tune, data):
 def ARXT_tree(splt, tune, data):
     start_time = time.time()
     train_len = 1000
+    ART_bool = False
     # Define hyperparameter bounds
     retrain = "retrain"
     if tune: retrain = "retune"
@@ -139,7 +140,7 @@ def ARXT_tree(splt, tune, data):
         "max_weight": (0.01, 0.15)
     }
 
-    opt_params = optimizer(pbounds, 0 , train_len, splt, 0, data)
+    opt_params = optimizer(pbounds, 0 , train_len, splt, 0, data, ART_bool)
     p, max_depth, min_size, max_weight = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size']), opt_params['max_weight']
     next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3), "max_weight" : (max(0.001, max_weight*0.7), max_weight*1.3)}
 
@@ -156,7 +157,7 @@ def ARXT_tree(splt, tune, data):
         if tune:
             if data.index[i] in CPS:
                 print("retraining at ", data.index[i])
-                opt_params = optimizer(next_pbounds, i-500, i, splt, retuning, data, init_points=5, n_iter = 10)
+                opt_params = optimizer(next_pbounds, i-500, i, splt, retuning, data, ART_bool, init_points=5, n_iter = 10)
                 retuning += 1
                 p, max_depth, min_size, max_weight = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size']), opt_params['max_weight']
                 next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3), "max_weight" : (max(0.001, max_weight*0.7), max_weight*1.3)}
@@ -189,7 +190,7 @@ def ARX_model(p, train, data):
     if train: retrain = "retune"
     end_time = time.time()
     duration = end_time-start_time
-    print("Time taken for AR(p) {}: {} mins".format(retrain, round(duration)/60))
+    print("Time taken for ARX(p) {}: {} mins".format(retrain, round(duration)/60))
     # pd.dataFrame(forecasts).to_csv("forecasts_AR_{}.csv".format(retrain))
 
     return forecasts
@@ -212,15 +213,15 @@ def main():
     data = get_data(differencing=differencing)
     print(data)
 
-    # ARTX_exog_tuned = ARXT_tree("exog", True, data)
-    # ARTX_exog_trained = ARXT_tree("exog", False, data)
-    # ARTX_target_tuned = ARXT_tree("target", True, data)
-    # ARTX_target_trained = ARXT_tree("target", False, data)
+    ARTX_exog_tuned = ARXT_tree("exog", True, data)
+    ARTX_exog_trained = ARXT_tree("exog", False, data)
+    ARTX_target_tuned = ARXT_tree("target", True, data)
+    ARTX_target_trained = ARXT_tree("target", False, data)
     ART_tuned = ART_tree(True, data)
     ART_trained = ART_tree(False, data)
-    # ARX_p_trained =  ARX_model(5, True, data)
-    # ARX_p =  ARX_model(5, False, data)
-    # AR_p =  AR_model(5, data)
+    ARX_p_trained =  ARX_model(5, True, data)
+    ARX_p =  ARX_model(5, False, data)
+    AR_p =  AR_model(5, data)
     
     # plt.plot(data.iloc[1000:,0], label="truth")
     # plt.plot(ARTX_exog_tuned, label="ARX_p_trained")
@@ -229,7 +230,7 @@ def main():
 
     if differencing: prep_met = "diff"
     else: prep_met = "norm"
-    # pd.DataFrame([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, ART_tuned, ART_trained, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
+    pd.DataFrame([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, ART_tuned, ART_trained, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
 
 
 if __name__ == "__main__":
