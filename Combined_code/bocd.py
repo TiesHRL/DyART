@@ -283,4 +283,4 @@ if __name__ == '__main__':
     pd.DataFrame(changepoints).to_csv("Data/changepoints.csv", index=False)
     # pd.DataFrame(R).to_csv("R_mat.csv", index=False)
     
-    # plot_posterior(T, data, R, pmean, pvar, cps, dt_index)
+    plot_posterior(T, data, R, pmean, pvar, cps, dt_index)

@@ -34,7 +34,7 @@ def get_data(differencing = False):
 
     else:
         data = pd.DataFrame(np.log1p(data))
-    data = data*100
+    # data = data*100
 
     return(data)
 
@@ -71,21 +71,19 @@ def objective_function(p, max_depth, min_size, max_weight, start, fin, splt, dat
     performance = 2 * hit_rate_sample - rmse_sample * 0.5
     return performance
 
-def optimizer(pbounds, start, fin, splt, retune_it, data, ART_bool, init_points=10, n_iter=30):
+def optimizer(pbounds, start, fin, splt, data, ART_bool, init_points=10, n_iter=30):
     if ART_bool:
         optimizer = BayesianOptimization(f= lambda p, max_depth, min_size: objective_function(p, max_depth, min_size, 0, start, fin, splt, data, ART_bool), pbounds=pbounds, random_state=1)
     else:
         optimizer = BayesianOptimization(f= lambda p, max_depth, min_size, max_weight: objective_function(p, max_depth, min_size, max_weight, start, fin, splt, data, ART_bool), pbounds=pbounds, random_state=1)
     acq_function = UtilityFunction(kind="ei", kappa=5, kappa_decay=0.8)
-    # logger = JSONLogger(path=f"./logs_{splt}_{retune_it}.log")
-    # optimizer.subscribe(Events.OPTIMIZATION_STEP, logger)
     optimizer.maximize(init_points, n_iter, acquisition_function = acq_function)
     opt_params  = optimizer.max['params']
     return opt_params
 
 def ART_tree(tune, data):
     ART_bool = True
-    splt = False
+    splt = "none"
     start_time = time.time()
     train_len = 1000
     # Define hyperparameter bounds
@@ -97,31 +95,27 @@ def ART_tree(tune, data):
         "min_size":(1, 50)
         }
 
-    opt_params = optimizer(pbounds, 0 , train_len, splt, 0, data, ART_bool)
+    opt_params = optimizer(pbounds, 0 , train_len, splt, data, ART_bool)
     p, max_depth, min_size = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
     next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
 
     ART = ARXT.AutoregressiveTree(p)    
 
-    _, _, tree, _, _ = train_run_ART(data=data.iloc[200:train_len], p=p, max_depth=max_depth, min_size=min_size)
-    # c_det = bayes_models.OnlineChagepoint(np.array(data[0]), constant_hazard, 200)
-    # log_likelihood_class = c_det.warm_run(llc = online_ll.StudentT(alpha=0.1, beta=.01, kappa=1, mu=0),t = train_len)
-    # Nw = 200
+    _, _, tree, _, _ = train_run_ART(data=data.iloc[:train_len], p=p, max_depth=max_depth, min_size=min_size)
+
     forecasts = []
-    retuning = 1
     for i in range(train_len, len(data[0])):
-        forecasts.append(ARXT.forecast_ART(data.iloc[i-200:i], tree, ART, p))
+        forecasts.append(ARXT.forecast_ART(data.iloc[i-1000:i], tree, ART, p))
         if tune:
             if data.index[i] in CPS:
-                print("retraining at ", data.index[i])
-                opt_params = optimizer(next_pbounds, i-500, i, splt, retuning, data, ART_bool, init_points=5, n_iter = 10)
-                retuning += 1
+                print("retuning at ", data.index[i])
+                opt_params = optimizer(next_pbounds, i-500, i, splt, data, ART_bool, init_points=5, n_iter = 10)
                 p, max_depth, min_size, = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
                 next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
 
                 ART = ARXT.AutoregressiveTree(p)    
         
-                _, _, tree, _, _ = train_run_ART(data=data[i-600:i], p=p, max_depth=max_depth, min_size=min_size)
+                _, _, tree, _, _ = train_run_ART(data=data[i-1000:i], p=p, max_depth=max_depth, min_size=min_size)
     end_time = time.time()
     duration = end_time-start_time
     print("Time taken for ART {} : {} mins".format(retrain, round(duration)/60))
@@ -140,25 +134,21 @@ def ARXT_tree(splt, tune, data):
         "max_weight": (0.01, 0.15)
     }
 
-    opt_params = optimizer(pbounds, 0 , train_len, splt, 0, data, ART_bool)
+    opt_params = optimizer(pbounds, 0 , train_len, splt, data, ART_bool)
     p, max_depth, min_size, max_weight = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size']), opt_params['max_weight']
     next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3), "max_weight" : (max(0.001, max_weight*0.7), max_weight*1.3)}
 
     ART = ARXT.AutoregressiveXTree(p, splt=splt)    
 
-    _, _, tree, _, _ = train_run_tree(data=data.iloc[200:train_len], p=p, max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
-    # c_det = bayes_models.OnlineChagepoint(np.array(data[0]), constant_hazard, 200)
-    # log_likelihood_class = c_det.warm_run(llc = online_ll.StudentT(alpha=0.1, beta=.01, kappa=1, mu=0),t = train_len)
-    # Nw = 200
+    _, _, tree, _, _ = train_run_tree(data=data.iloc[:train_len], p=p, max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
+ 
     forecasts = []
-    retuning = 1
     for i in range(train_len, len(data[0])):
         forecasts.append(ARXT.forecast(data.iloc[i-200:i], tree, ART, p))
         if tune:
             if data.index[i] in CPS:
                 print("retraining at ", data.index[i])
-                opt_params = optimizer(next_pbounds, i-500, i, splt, retuning, data, ART_bool, init_points=5, n_iter = 10)
-                retuning += 1
+                opt_params = optimizer(next_pbounds, i-500, i, splt, data, ART_bool, init_points=5, n_iter = 10)
                 p, max_depth, min_size, max_weight = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size']), opt_params['max_weight']
                 next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3), "max_weight" : (max(0.001, max_weight*0.7), max_weight*1.3)}
 
@@ -208,28 +198,33 @@ def AR_model(p, data):
     print("Time taken for AR({}): {} mins".format(p, duration/60))
 
     return forecasts
+
 def main():
-    differencing = True
+    differencing = False
     data = get_data(differencing=differencing)
     print(data)
 
     ARTX_exog_tuned = ARXT_tree("exog", True, data)
     ARTX_exog_trained = ARXT_tree("exog", False, data)
-    ARTX_target_tuned = ARXT_tree("target", True, data)
-    ARTX_target_trained = ARXT_tree("target", False, data)
-    ART_tuned = ART_tree(True, data)
-    ART_trained = ART_tree(False, data)
-    ARX_p_trained =  ARX_model(5, True, data)
-    ARX_p =  ARX_model(5, False, data)
-    AR_p =  AR_model(5, data)
+    # ARTX_target_tuned = ARXT_tree("target", True, data)
+    # ARTX_target_trained = ARXT_tree("target", False, data)
+    # ART_tuned = ART_tree(True, data)
+    # ART_trained = ART_tree(False, data)
+    # ARX_p_trained =  ARX_model(5, True, data)
+    # ARX_p =  ARX_model(5, False, data)
+    # AR_p =  AR_model(5, data)
     
     # plt.plot(data.iloc[1000:,0], label="truth")
-    # plt.plot(ARTX_exog_tuned, label="ARX_p_trained")
+    # plt.plot(ART_tuned, label="ART_p_tuned")
+    # plt.plot(ART_trained, label="ART_p_trained")
+    # # plt.plot(ARTX_target_tuned, label="ART_p_trained")
+
     # plt.legend()
     # plt.show()
 
     if differencing: prep_met = "diff"
     else: prep_met = "norm"
+    # pd.DataFrame([ART_tuned, ART_trained]).to_csv(f"Data\\results_ART_{prep_met}.csv")
     pd.DataFrame([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, ART_tuned, ART_trained, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
 
 

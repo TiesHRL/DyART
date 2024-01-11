@@ -412,11 +412,6 @@ class AutoregressiveXTree:
                 return self.predict(node['right'], row)
             else:
                 return node['right']
-import numpy as np
-from numpy.linalg import det, inv
-from scipy.special import gamma
-from math import pi
-from scipy.special import erfinv
 
 class AutoregressiveTree:
     
@@ -627,6 +622,7 @@ def hit_rate(ts_true, ts_pred):
     diff_true = np.diff(ts_true)
     diff_pred = np.diff(ts_pred)
     return np.sum(np.sign(diff_true) == np.sign(diff_pred)) / len(diff_true)
+
 def ART_time_series_pred(data, p, preprocessing_method, max_depth, min_size):
     ts_train, ts_valid, ts_param = preprocessing(data, method=preprocessing_method)
     
@@ -691,16 +687,14 @@ def ART_time_series_pred(data, p, preprocessing_method, max_depth, min_size):
     return d_val_cumsum, valid_prediction_cumsum, tree
 
 def forecast_ART(data, tree, ART, p):
-    
-    ts_param = [np.mean(data, axis=0), np.std(data, axis=0)]
+    data = data.iloc[0]
+    ts_param = [np.mean(data), np.std(data)]
     temp_data = (data - np.mean(data, axis=0)) / np.std(data, axis=0)
-    temp_data = temp_data[0]
-    valid_window = np.array(temp_data[-p:].iloc[::-1])
-    parameters = ART.predict(tree, valid_window)
-    prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
-    d_val_mean = ts_param[0][2]
-    d_val_std = ts_param[0][3]
-    prediction_temp = (prediction_temp * d_val_std) + d_val_mean
+    # temp_data = temp_data[0]
+    valid_window = np.array(data[-p-1:].iloc[::-1])
+    parameters = ART.predict(tree, valid_window[1:])
+    prediction = np.dot(valid_window[1:][:,np.newaxis].T,parameters[1]) + parameters[2]  
+    prediction_temp = prediction[0]*ts_param[1] + ts_param[0]
 
     return prediction_temp[0]
 def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, max_weight, splt="exog"):
