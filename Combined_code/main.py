@@ -9,7 +9,7 @@ from math import sqrt
 from bayes_opt import BayesianOptimization, UtilityFunction
 from statsmodels.tsa.arima.model import ARIMA
 import time 
-
+from bocd import BOCD_Online, GaussianUnknownMean
 def get_data(differencing = False):
     """
     Retrieves and preprocesses financial data.
@@ -33,7 +33,7 @@ def get_data(differencing = False):
 
     else:
         data = pd.DataFrame(np.log1p(data))
-    # data = data*100
+    data = data*100
 
     return(data)
 
@@ -95,11 +95,11 @@ def objective_function(p, max_depth, min_size, max_weight, start, fin, splt, dat
     """
     if ART_bool:
         p, max_depth, min_size =  round(p), round(max_depth), round(min_size)
-        d_val_cumsum, valid_prediction_cumsum, _, hit_rate_sample, rmse_sample = train_run_ART(data[start:fin], p, max_depth, min_size)
+        _, _, _, hit_rate_sample, rmse_sample = train_run_ART(data[start:fin], p, max_depth, min_size)
 
     else:
         p, max_depth, min_size, max_weight =  round(p), round(max_depth), round(min_size), max_weight
-        d_val_cumsum, valid_prediction_cumsum, _, hit_rate_sample, rmse_sample = train_run_tree(data[start:fin], p, max_depth, min_size, max_weight, splt=splt)
+        _, _, _, hit_rate_sample, rmse_sample = train_run_tree(data[start:fin], p, max_depth, min_size, max_weight, splt=splt)
 
     performance = 2 * hit_rate_sample - rmse_sample * 0.5
     return performance
@@ -158,10 +158,18 @@ def ART_tree(tune, train, data):
 
     _, _, tree, _, _ = train_run_ART(data=data.iloc[:train_len], p=p, max_depth=max_depth, min_size=min_size)
 
+    T      = len(data.iloc[:,0])-train_len   # Number of observations.
+    hazard = 1/500  # Constant prior on changepoint probability.
+    mean0  = np.mean(data.iloc[0:train_len,0])      # The prior mean on the mean parameter.
+    var0   = 1  # The prior variance for mean parameter.
+    varx   = np.std(data.iloc[0:train_len,0])  # The known variance of the data.
+    model = GaussianUnknownMean(mean0, var0, varx)
+    CPD = BOCD_Online(T, model, hazard)
+
     forecasts = []
     for i in range(train_len, len(data[0])):
         forecasts.append(ARXT.forecast_ART(data.iloc[i-1000:i], tree, ART, p))
-        if data.index[i] in CPS:
+        if CPD.update(i-train_len+1, data.iloc[i, 0]):
             if tune:
                 print("retuning at ", data.index[i])
                 opt_params = optimizer(next_pbounds, i-500, i, splt, data, ART_bool, init_points=5, n_iter = 10)
@@ -208,11 +216,19 @@ def ARXT_tree(splt, tune, train, data):
     ART = ARXT.AutoregressiveXTree(p, splt=splt)    
 
     _, _, tree, _, _ = train_run_tree(data=data.iloc[:train_len], p=p, max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
- 
+    
+    T      = len(data.iloc[:,0])-train_len   # Number of observations.
+    hazard = 1/500  # Constant prior on changepoint probability.
+    mean0  = np.mean(data.iloc[0:train_len,0])      # The prior mean on the mean parameter.
+    var0   = 1  # The prior variance for mean parameter.
+    varx   = np.std(data.iloc[0:train_len,0]) # The known variance of the data.
+    model = GaussianUnknownMean(mean0, var0, varx)
+    CPD = BOCD_Online(T, model, hazard)
+
     forecasts = []
     for i in range(train_len, len(data[0])):
         forecasts.append(ARXT.forecast(data.iloc[i-200:i], tree, ART, p))
-        if data.index[i] in CPS:
+        if CPD.update(i-train_len+1, data.iloc[i, 0]):
             if tune:
                 print("retraining at ", data.index[i])
                 opt_params = optimizer(next_pbounds, i-500, i, splt, data, ART_bool, init_points=5, n_iter = 10)
@@ -240,11 +256,19 @@ def ARX_model(p, train, data):
     AR = ARXT.ARX_p(data, p)    
 
     AR.ARX_p_model(0, train_len)
- 
+
+    T      = len(data.iloc[:,0])-train_len   # Number of observations.
+    hazard = 1/500  # Constant prior on changepoint probability.
+    mean0  = np.mean(data.iloc[0:train_len,0])      # The prior mean on the mean parameter.
+    var0   = 1  # The prior variance for mean parameter.
+    varx   = np.std(data.iloc[0:train_len,0])  # The known variance of the data.
+    model = GaussianUnknownMean(mean0, var0, varx)
+    CPD = BOCD_Online(T, model, hazard)
+
     forecasts = []
     for i in range(train_len, len(data[0])):
         if train:
-            if data.index[i] in CPS:
+            if CPD.update(i-train_len+1, data.iloc[i, 0]):
                 print("retraining at ", data.index[i])
                 AR.ARX_p_model(max(0,i-500), i)
 
@@ -295,22 +319,22 @@ def main():
     print(data)
 
     # Calling various forecasting functions with different configurations
-    ARXT_exog_tuned = ARXT_tree("exog", True, True, data)
-    ARXT_exog_trained = ARXT_tree("exog", False, True, data)
-    ARXT_exog = ARXT_tree("exog", False, False, data)
-    ARXT_target_tuned = ARXT_tree("target", True, True, data)
-    ARXT_target_trained = ARXT_tree("target", False, True, data)
-    ARXT_target = ARXT_tree("target", False, False, data)./
+    # ARXT_exog_tuned = ARXT_tree("exog", True, True, data)
+    # ARXT_exog_trained = ARXT_tree("exog", False, True, data)
+    # ARXT_exog = ARXT_tree("exog", False, False, data)
+    # ARXT_target_tuned = ARXT_tree("target", True, True, data)
+    # ARXT_target_trained = ARXT_tree("target", False, True, data)
+    # ARXT_target = ARXT_tree("target", False, False, data)
     ART_tuned = ART_tree(True, True, data)
-    ART_trained = ART_tree(False, True, data)
-    ART = ART_tree(False, False, data)
-    ARX_p_trained =  ARX_model(5, True, data)
-    ARX_p =  ARX_model(5, False, data)
-    AR_p =  AR_model(5, data)
+    # ART_trained = ART_tree(False, True, data)
+    # ART = ART_tree(False, False, data)
+    # ARX_p_trained =  ARX_model(5, True, data)
+    # ARX_p =  ARX_model(5, False, data)
+    # AR_p =  AR_model(5, data)
     
     if differencing: prep_met = "diff"
     else: prep_met = "norm"
-    pd.DataFrame([ARXT_exog_tuned, ARXT_exog_trained, ARXT_exog, ARXT_target_tuned, ARXT_target_trained, ARXT_target, ART_tuned, ART_trained, ART, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
+    # pd.DataFrame([ARXT_exog_tuned, ARXT_exog_trained, ARXT_exog, ARXT_target_tuned, ARXT_target_trained, ARXT_target, ART_tuned, ART_trained, ART, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
 
 if __name__ == "__main__":
     main()

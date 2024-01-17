@@ -22,17 +22,15 @@ This code is associated with the following blog posts:
 
 import matplotlib.pyplot as plt
 from   matplotlib.colors import LogNorm
-# from matplotlib.dates import mdates
+import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 from   scipy.stats import norm
 from   scipy.special import logsumexp
-from main import get_data
-
 
 # -----------------------------------------------------------------------------
 
-def bocd(data, model, hazard):
+def bocd_offline(data, model, hazard):
     """Return run length posterior using Algorithm 1 in Adams & MacKay 2007.
     """
     # 1. Initialize lower triangular matrix representing the posterior as
@@ -83,7 +81,64 @@ def bocd(data, model, hazard):
     R = np.exp(log_R)
     return R, pmean, pvar
 
+# -----------------------------------------------------------------------------
+class BOCD_Online:
+    def __init__(self, T, model, hazard):
+        self.T           = T
+        self.log_R       = -np.inf * np.ones((self.T+1, self.T+1))
+        self.log_R[0, 0] = 0              # log 0 == 1
+        self.pmean       = np.empty(self.T)    # Model's predictive mean.
+        self.pvar        = np.empty(self.T)    # Model's predictive variance. 
+        self.log_message = np.array([0])  # log 0 == 1
+        self.log_H       = np.log(hazard)
+        self.log_1mH     = np.log(1 - hazard)
+        self.model       = model
 
+        self.R = np.exp(self.log_R)
+        self.changepoints = []
+    def update(self, i, x):
+
+        # 2. Observe new datum.
+        # Make model predictions.
+        self.pmean[i-1] = np.sum(np.exp(self.log_R[i-1, :i]) * self.model.mean_params[:i])
+        self.pvar[i-1]  = np.sum(np.exp(self.log_R[i-1, :i]) * self.model.var_params[:i])
+        
+        # 3. Evaluate predictive probabilities.
+        log_pis = self.model.log_pred_prob(i, x)
+
+        # 4. Calculate growth probabilities.
+        log_growth_probs = log_pis + self.log_message + self.log_1mH
+
+        # 5. Calculate changepoint probabilities.
+        log_cp_prob = logsumexp(log_pis + self.log_message + self.log_H)
+
+        # 6. Calculate evidence
+        new_log_joint = np.append(log_cp_prob, log_growth_probs)
+
+        # 7. Determine run length distribution.
+        self.log_R[i, :i+1]  = new_log_joint
+        self.log_R[i, :i+1] -= logsumexp(new_log_joint)
+
+        # 8. Update sufficient statistics.
+        self.model.update_params(i, x)
+
+        # Pass message.
+        self.log_message = new_log_joint
+
+        if np.exp(self.log_R[i, 1]) > 0.8:
+            try:
+                if i - self.changepoints[-1] >= 250:
+                    self.changepoints.append(i)
+                    return True
+            except:
+                if i >= 100:
+                    self.changepoints.append(i)
+                    return True            
+        else:
+            return False        
+    def retR(self):
+        return np.exp(self.log_R)
+    
 # -----------------------------------------------------------------------------
 
 
@@ -147,40 +202,7 @@ def generate_data(varx, mean0, var0, T, cp_prob):
 
 
 # -----------------------------------------------------------------------------
-import matplotlib.dates as mdates
-from pandas.tseries.offsets import BDay
 
-# def plot_posterior(T, data, R, pmean, pvar, cps):
-#     # index = data.index[0] + data.index
-#     R = R[:-1,:-1]
-#     R = pd.DataFrame(R, index=data.index)
-#     fig, axes = plt.subplots(2, 1, figsize=(20, 10), sharex=True)
-#     ax1, ax2 = axes
-
-#     ax1.scatter(data.index, data)
-#     ax1.plot(data.index, data)
-
-
-#     # Plot predictions.
-#     ax1.plot(data.index, pmean, color='k')
-#     _2std = 2 * np.sqrt(pvar)
-#     ax1.plot(data.index, pmean - _2std, color='k', linestyle='--')
-#     ax1.plot(data.index, pmean + _2std, color='k', linestyle='--')
-#     plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
-
-
-#     ax2.imshow(np.rot90(R), aspect='auto', cmap='gray_r', 
-#                norm=LogNorm(vmin=0.0001, vmax=1))
-#     ax2.set_xlim([0,T])
-   
-#     ax2.margins(0)
-
-#     for cp in cps:
-#         ax1.axvline(cp, c='red', ls='dotted')
-#         ax2.axvline(cp, c='red', ls='dotted')
-
-#     plt.tight_layout()
-#     plt.show()
 def plot_posterior(T, data, R, pmean, pvar, cps, dts):
     # Assuming R is already truncated as needed and converted to a DataFrame
     R = R[:-1,:-1]
@@ -257,7 +279,12 @@ def get_changepoint_indices(R, threshold=0.8, min_distance=100):
 if __name__ == '__main__':
     train_len = 1000
 
-    data = get_data()[0] #.pct_change(1)
+    data = pd.read_csv('Data/fin_data.csv')
+    data.index = data["Date"]
+    data = data.drop(["Date"], axis=1)
+    dt_index = data.index[train_len:]
+    data = data.pct_change()
+    data = data.iloc[:,0]    
     dt_index = data.index[train_len:]
     print(data)
     # data = np.log1p(data.pct_change())
@@ -275,7 +302,7 @@ if __name__ == '__main__':
 
 
     model          = GaussianUnknownMean(mean0, var0, varx)
-    R, pmean, pvar = bocd(data, model, hazard)
+    R, pmean, pvar = bocd_offline(data, model, hazard)
    
     cps = get_changepoint_indices(R, min_distance=250)
     changepoints = data.index[cps]
