@@ -4,21 +4,20 @@ from ARXT import hit_rate
 import data_gen
 import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_absolute_percentage_error
+from sklearn.metrics import mean_squared_error
 from math import sqrt
 from bayes_opt import BayesianOptimization, UtilityFunction
-from bayes_opt.logger import JSONLogger
-from bayes_opt.event import Events
-import matplotlib.pyplot as plt
-# import bayesian_changepoint_detection.bayesian_models as bayes_models
-# from bayesian_changepoint_detection.hazard_functions import constant_hazard
-# import bayesian_changepoint_detection.online_likelihoods as online_ll
 from statsmodels.tsa.arima.model import ARIMA
 import time 
 
 def get_data(differencing = False):
+    """
+    Retrieves and preprocesses financial data.
 
-    # tickers = ["^GSPC", "^IXIC", "^DJI","JPYUSD=X", "^VIX", "GBPUSD=X", "EURUSD=X] # , "GBPUSD=X", "EURUSD=X",
+    :param differencing: Boolean to determine if differencing is applied.
+    :return: Preprocessed data as a Pandas DataFrame.
+    """
+    # tickers = ["^GSPC", "^IXIC", "^DJI","JPYUSD=X", "^VIX", "GBPUSD=X", "EURUSD=X]
     # data = data_gen.collect_data(tickers)
     data = pd.read_csv("Data/fin_data.csv")
     # data.to_csv("data/fin_data.csv")
@@ -39,27 +38,61 @@ def get_data(differencing = False):
     return(data)
 
 def train_run_tree(data, p, max_depth, min_size, max_weight, splt):
+    """
+    Trains and evaluates the ARXT model.
+
+    :param data: The input data.
+    :param p: The lag order.
+    :param max_depth: The maximum depth of the tree.
+    :param min_size: The minimum size of a node.
+    :param max_weight: The maximum weight.
+    :param splt: Split method.
+    :return: Cumulative actual values, predictions, list of trees, hit rate, and RMSE.
+    """
     p, max_depth, min_size =  int(round(p)), int(round(max_depth)), int(round(min_size))
     d_val_cumsum, valid_prediction_cumsum, tree_list = ARXT.ARXT_time_series_pred(data=data, p=p, preprocessing_method='normalization', max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
     hit_rate_sample = hit_rate(d_val_cumsum, valid_prediction_cumsum)
 
-    rmse_sample = (mean_absolute_percentage_error(d_val_cumsum, valid_prediction_cumsum))
+    rmse_sample = sqrt(mean_squared_error(d_val_cumsum, valid_prediction_cumsum))
 
     return d_val_cumsum, valid_prediction_cumsum, tree_list, hit_rate_sample, rmse_sample
 
 def train_run_ART(data, p, max_depth, min_size):
+    """
+    Trains and evaluates the ART model.
+
+    :param data: The input data.
+    :param p: The lag order.
+    :param max_depth: The maximum depth of the tree.
+    :param min_size: The minimum size of a node.
+    :return: Cumulative actual values, predictions, list of trees, hit rate, and RMSE.
+    """
     p, max_depth, min_size =  int(round(p)), int(round(max_depth)), int(round(min_size))
     d_val_cumsum, valid_prediction_cumsum, tree_list = ARXT.ART_time_series_pred(data=data, p=p, preprocessing_method='normalization', max_depth=max_depth, min_size=min_size)
     hit_rate_sample = hit_rate(d_val_cumsum, valid_prediction_cumsum)
 
-    rmse_sample = (mean_absolute_percentage_error(d_val_cumsum, valid_prediction_cumsum))
+    rmse_sample = sqrt(mean_squared_error(d_val_cumsum, valid_prediction_cumsum))
 
     return d_val_cumsum, valid_prediction_cumsum, tree_list, hit_rate_sample, rmse_sample
+
 # define and load in to global variables 
 CPS = pd.read_csv('data/changepoints.csv').to_numpy()
 
 def objective_function(p, max_depth, min_size, max_weight, start, fin, splt, data, ART_bool):
-    # Set up and train the ART model using the hyperparameters
+    """
+    Defines the objective function to pass to the optimizer function
+
+    :param data: The input data.
+    :param p: The lag order.
+    :param max_depth: The maximum depth of the tree.
+    :param min_size: The minimum size of a node.
+    :param start: Starting point to be used by the optimisation.
+    :param fin: Finishing point to be used by the optimisation.
+    :param splt: If splits should be made on exogenous variables.
+    :param data: Dataframe containing data with which the optimisation takes place.
+    :param ART_bool: Boolean to tell the model if an ART or ARXT model is to be trained.
+    :return: Performence Metric.
+    """
     if ART_bool:
         p, max_depth, min_size =  round(p), round(max_depth), round(min_size)
         d_val_cumsum, valid_prediction_cumsum, _, hit_rate_sample, rmse_sample = train_run_ART(data[start:fin], p, max_depth, min_size)
@@ -72,6 +105,19 @@ def objective_function(p, max_depth, min_size, max_weight, start, fin, splt, dat
     return performance
 
 def optimizer(pbounds, start, fin, splt, data, ART_bool, init_points=10, n_iter=30):
+    """
+    Conducts optimization using Bayesian Optimization to find the best hyperparameters.
+
+    :param pbounds: Dictionary containing the bounds for the parameters to be optimized.
+    :param start: Starting index for the data to be used in optimization.
+    :param fin: Ending index for the data to be used in optimization.
+    :param splt: Specifies if splits should be made on exogenous variables.
+    :param data: Dataframe containing the data for optimization.
+    :param ART_bool: Boolean indicating if the model is ART (True) or ARXT (False).
+    :param init_points: Number of initial random points for the Bayesian optimizer.
+    :param n_iter: Number of iterations for the optimization process.
+    :return: Dictionary containing the optimized parameters.
+    """
     if ART_bool:
         optimizer = BayesianOptimization(f= lambda p, max_depth, min_size: objective_function(p, max_depth, min_size, 0, start, fin, splt, data, ART_bool), pbounds=pbounds, random_state=1)
     else:
@@ -81,14 +127,23 @@ def optimizer(pbounds, start, fin, splt, data, ART_bool, init_points=10, n_iter=
     opt_params  = optimizer.max['params']
     return opt_params
 
-def ART_tree(tune, data):
+def ART_tree(tune, train, data):
+    """
+    Constructs and forecasts using an Autoregressive Tree (ART) model.
+
+    :param tune: Boolean indicating if the model should be retuned.
+    :param train: Boolean indicating if the model should be retrained.
+    :param data: Dataframe containing the dataset for model training and forecasting.
+    :return: List of forecasts generated by the ART model.
+    """    
     ART_bool = True
     splt = "none"
     start_time = time.time()
     train_len = 1000
     # Define hyperparameter bounds
-    retrain = "retrain"
     if tune: retrain = "retune"
+    elif train: retrain = "retrain"
+    else: retrain = ""
     pbounds = {
         "p": (1, 20),
         "max_depth":(10, 150),
@@ -106,27 +161,39 @@ def ART_tree(tune, data):
     forecasts = []
     for i in range(train_len, len(data[0])):
         forecasts.append(ARXT.forecast_ART(data.iloc[i-1000:i], tree, ART, p))
-        if tune:
-            if data.index[i] in CPS:
+        if data.index[i] in CPS:
+            if tune:
                 print("retuning at ", data.index[i])
                 opt_params = optimizer(next_pbounds, i-500, i, splt, data, ART_bool, init_points=5, n_iter = 10)
                 p, max_depth, min_size, = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size'])
                 next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3)}
-
+            if train:
                 ART = ARXT.AutoregressiveTree(p)    
-        
-                _, _, tree, _, _ = train_run_ART(data=data[i-1000:i], p=p, max_depth=max_depth, min_size=min_size)
+                _, _, tree, _, _ = train_run_ART(data=data[i-600:i], p=p, max_depth=max_depth, min_size=min_size)
+
     end_time = time.time()
     duration = end_time-start_time
     print("Time taken for ART {} : {} mins".format(retrain, round(duration)/60))
     return forecasts
-def ARXT_tree(splt, tune, data):
+
+def ARXT_tree(splt, tune, train, data):
+    """
+    Constructs and forecasts using an Autoregressive eXogenous Tree (ARXT) model.
+
+    :param splt: Specifies the splitting strategy for exogenous variables.
+    :param tune: Boolean indicating if the model should be retuned.
+    :param train: Boolean indicating if the model should be retrained.
+    :param data: Dataframe containing the dataset for model training and forecasting.
+    :return: List of forecasts generated by the ARXT model.
+    """
     start_time = time.time()
     train_len = 1000
     ART_bool = False
-    # Define hyperparameter bounds
-    retrain = "retrain"
+
     if tune: retrain = "retune"
+    elif train: retrain = "retrain"
+    else: retrain = ""
+
     pbounds = {
         "p": (1, 20),
         "max_depth":(10, 150),
@@ -145,15 +212,14 @@ def ARXT_tree(splt, tune, data):
     forecasts = []
     for i in range(train_len, len(data[0])):
         forecasts.append(ARXT.forecast(data.iloc[i-200:i], tree, ART, p))
-        if tune:
-            if data.index[i] in CPS:
+        if data.index[i] in CPS:
+            if tune:
                 print("retraining at ", data.index[i])
                 opt_params = optimizer(next_pbounds, i-500, i, splt, data, ART_bool, init_points=5, n_iter = 10)
                 p, max_depth, min_size, max_weight = round(opt_params['p']), round(opt_params['max_depth']), round(opt_params['min_size']), opt_params['max_weight']
                 next_pbounds = {"p": (p*0.7, p*1.3), "max_depth" : (max_depth*0.7, max_depth*1.3), "min_size" : (min_size*0.7, min_size*1.3), "max_weight" : (max(0.001, max_weight*0.7), max_weight*1.3)}
-
+            if train:
                 ART = ARXT.AutoregressiveXTree(p, splt=splt)    
-        
                 _, _, tree, _, _ = train_run_tree(data=data[i-600:i], p=p, max_depth=max_depth, min_size=min_size, max_weight=max_weight, splt=splt)
     end_time = time.time()
     duration = end_time-start_time
@@ -161,13 +227,20 @@ def ARXT_tree(splt, tune, data):
     return forecasts
 
 def ARX_model(p, train, data):
+    """
+    Constructs and forecasts using an Autoregressive with eXogenous inputs (ARX) model.
+
+    :param p: The order of the autoregressive model.
+    :param train: Boolean indicating if the model should be retrained.
+    :param data: Dataframe containing the dataset for model training and forecasting.
+    :return: List of forecasts generated by the ARX model.
+    """
     start_time = time.time()
     train_len = 1000
     AR = ARXT.ARX_p(data, p)    
 
     AR.ARX_p_model(0, train_len)
-    # c_det = bayes_models.OnlineChagepoint(np.array(data[0]), constant_hazard, 200)
-    # log_likelihood_class = c_det.warm_run(llc = online_ll.StudentT(alpha=0.1, beta=.01, kappa=1, mu=0),t = train_len)
+ 
     forecasts = []
     for i in range(train_len, len(data[0])):
         if train:
@@ -181,10 +254,16 @@ def ARX_model(p, train, data):
     end_time = time.time()
     duration = end_time-start_time
     print("Time taken for ARX(p) {}: {} mins".format(retrain, round(duration)/60))
-    # pd.dataFrame(forecasts).to_csv("forecasts_AR_{}.csv".format(retrain))
 
     return forecasts
 def AR_model(p, data):
+    """
+    Constructs and forecasts using an Autoregressive (AR) model.
+
+    :param p: The order of the autoregressive model.
+    :param data: Dataframe containing the dataset for model training and forecasting.
+    :return: List of forecasts generated by the AR model.
+    """
     start_time = time.time()
     train_len = 1000
     forecasts = []
@@ -200,33 +279,38 @@ def AR_model(p, data):
     return forecasts
 
 def main():
+    """
+    The main function that executes the entire forecasting process.
+
+    This function:
+    - Retrieves the data,
+    - Executes different forecasting models (ARXT with exogenous/target variables, ART, ARX, AR),
+    - Optionally tunes and retrains the models,
+    - Outputs the forecasts to a CSV file.
+
+    The function does not take any parameters and does not return any values. It primarily serves to orchestrate the forecasting workflow.
+    """
     differencing = False
     data = get_data(differencing=differencing)
     print(data)
 
-    ARTX_exog_tuned = ARXT_tree("exog", True, data)
-    ARTX_exog_trained = ARXT_tree("exog", False, data)
-    # ARTX_target_tuned = ARXT_tree("target", True, data)
-    # ARTX_target_trained = ARXT_tree("target", False, data)
-    # ART_tuned = ART_tree(True, data)
-    # ART_trained = ART_tree(False, data)
-    # ARX_p_trained =  ARX_model(5, True, data)
-    # ARX_p =  ARX_model(5, False, data)
-    # AR_p =  AR_model(5, data)
+    # Calling various forecasting functions with different configurations
+    ARXT_exog_tuned = ARXT_tree("exog", True, True, data)
+    ARXT_exog_trained = ARXT_tree("exog", False, True, data)
+    ARXT_exog = ARXT_tree("exog", False, False, data)
+    ARXT_target_tuned = ARXT_tree("target", True, True, data)
+    ARXT_target_trained = ARXT_tree("target", False, True, data)
+    ARXT_target = ARXT_tree("target", False, False, data)./
+    ART_tuned = ART_tree(True, True, data)
+    ART_trained = ART_tree(False, True, data)
+    ART = ART_tree(False, False, data)
+    ARX_p_trained =  ARX_model(5, True, data)
+    ARX_p =  ARX_model(5, False, data)
+    AR_p =  AR_model(5, data)
     
-    # plt.plot(data.iloc[1000:,0], label="truth")
-    # plt.plot(ART_tuned, label="ART_p_tuned")
-    # plt.plot(ART_trained, label="ART_p_trained")
-    # # plt.plot(ARTX_target_tuned, label="ART_p_trained")
-
-    # plt.legend()
-    # plt.show()
-
     if differencing: prep_met = "diff"
     else: prep_met = "norm"
-    # pd.DataFrame([ART_tuned, ART_trained]).to_csv(f"Data\\results_ART_{prep_met}.csv")
-    pd.DataFrame([ARTX_exog_tuned, ARTX_exog_trained, ARTX_target_tuned, ARTX_target_trained, ART_tuned, ART_trained, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
-
+    pd.DataFrame([ARXT_exog_tuned, ARXT_exog_trained, ARXT_exog, ARXT_target_tuned, ARXT_target_trained, ARXT_target, ART_tuned, ART_trained, ART, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
 
 if __name__ == "__main__":
     main()

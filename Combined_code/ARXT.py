@@ -19,6 +19,13 @@ import networkx as nx
 warnings.filterwarnings("ignore")
 
 def preprocessing(data, method):
+    """
+    Preprocesses the given data using the specified method.
+
+    :param data: The dataset to be preprocessed.
+    :param method: The method to be used for preprocessing.
+    :return: The preprocessed dataset.
+    """
     ts_train = []
     ts_valid = []
     ts_param = []
@@ -61,8 +68,21 @@ def preprocessing(data, method):
     return ts_train, ts_valid, ts_param
 
 class AutoregressiveXTree:
-    
+    """
+    Represents an Autoregressive model with eXogenous inputs (ARXT) as a tree structure.
+
+    This class provides functionalities for building and using an ARXT model,
+    which combines autoregressive components with external factors.
+
+    Attributes:
+        p (int): The order of the autoregressive model.
+        u0 (float): Initial value for calculations.
+        alpha_u (float): Alpha parameter for the model.
+        X (DataFrame): Exogenous variables used in the model.
+        splt (str): Strategy for splitting the data.
+    """
     def __init__(self, p, u0=0, alpha_u=1, X=None, splt="target"):
+        # Initializes an instance of the class with specified parameters.
         self._X = X  # Exogenous data
         
         erf_temp = np.zeros([7,1])
@@ -80,23 +100,24 @@ class AutoregressiveXTree:
         self.exog = []
         self.test = {}
         self.splt = splt
-    #  calculate the sample mean of the data (could be a vector), maybe split into sample mean of each variable
+
+    # Calculates the sample mean of the given data.
     def sample_mean(self, data):
-        # print(sum(data), len(data))
         return sum(np.asarray(data))/len(data)
 
-    # calculate the scatter matrix around the mean uN
     def scatter_matrix(self, data, uN_):
+
         temp = data - uN_
         SN = 0
         for row in temp:
             row = row[:, np.newaxis]
             SN += row * row.T
         return SN
+    
+    # updates the WN matric for the autoregressive model. Involves uses mean, variance matrix original wn and length of data, the covariance matrix of the strucutre
     def WN_func(self, uN_, SN, W0, N):
         temp = self._u0 - uN_
 
-        # Assuming scatter matrix has been computed from preprocessed data
         temp = temp[:, np.newaxis]
         WN = W0 + SN + ((self._alpha_u * N) / (self._alpha_u + N)) * np.dot(temp, temp.T)
         return WN
@@ -145,25 +166,14 @@ class AutoregressiveXTree:
         ((self._alpha_u / (self._alpha_u + N))**((self._p + 1) / 2)) + \
         (self.c_func(self._p + 1, self._alpha_W + N) / self.c_func(self._p + 1, self._alpha_W)) * (det(W0)**(self._alpha_W / 2))*(det(WN)**(-(self._alpha_W + N) / 2))
         return pds
-    # similiar to above just now with different params
+    
+    # similiar to above now with different params
     def pd_s_func(self, u0_, N_, W0_, WN_):
         pds = (pi**(-((self._p + 1) * N_) / 2)) + \
         ((self._alpha_u / (self._alpha_u + N_))**((self._p + 1) / 2)) + \
         (self.c_func(self._p + 1, self._alpha_W - 1 + N_) / self.c_func(self._p + 1, self._alpha_W - 1)) * (det(W0_)**((self._alpha_W - 1) / 2))*(det(WN_)**(-(self._alpha_W - 1 + N_) / 2))
         return pds
-    def mult_func(self, l, alpha, N):
-        c = 1
-        for i in range(1, l + 1):
-            c *= ((alpha + 1 + N - i)/(alpha + 1 - i))
-        return c
-
-    def pds_func2(self, N, W0, WN, u0_, N_, W0_, WN_):
-
-        pds = (det(W0)**(self._alpha_W / 2))*det(WN)**(-(self._alpha_W + N) / 2) / \
-        (det(W0_)**((self._alpha_W - 1) / 2))*(det(WN_)**(-(self._alpha_W - 1 + N_) / 2)) * \
-        self.mult_func(self._p + 1,self._alpha_W, N)                                                                                                             
-
-        return pds
+    # approximation of the pds function for large N
     def pds_approx(self, N, W0, WN):
 
         likelihood_val = (self._alpha_u / (self._alpha_u + N))**((self._p + 1) / 2)
@@ -172,6 +182,7 @@ class AutoregressiveXTree:
         likelihood_val -= self._alpha_W/2 * log(N)
         return likelihood_val
     
+    # Determines the leaf score for the given split data
     def LeafScore(self, data):
         N = len(data)
         self.target = data
@@ -198,7 +209,7 @@ class AutoregressiveXTree:
         
         return pds2
         
-    # This will spplit a dataset into two froups based on the specific features. Then splits the data points into the left or right set
+    # This will split a dataset into two groups based on the specific features. Then splits the data points into the left or right set
     def test_split(self, index, value, dataset):
         left, right = list(), list()
         for row in dataset:
@@ -207,6 +218,8 @@ class AutoregressiveXTree:
             else:
                 right.append(row)
         return left, right
+    
+    # defines the splits for the exogenous     
     def rest_split(self, index, value, train, exog, ex, var):
                 # Initializations
         left, right = [], []
@@ -259,6 +272,7 @@ class AutoregressiveXTree:
         left_exog = [df.values.tolist() for df in left_exog]
         right_exog = [df.values.tolist() for df in right_exog]
         return left, right, left_exog, right_exog
+    
     # itrates through the features and the values to det the best for splitting the dataset, calkculates the score for each split and choses the one with best improvement
     def get_split(self, train, train_exog):
         self.target, self.exog = train, train_exog
@@ -414,7 +428,18 @@ class AutoregressiveXTree:
                 return node['right']
 
 class AutoregressiveTree:
-    
+    """
+    Represents an Autoregressive Tree (ART) model.
+
+    This class is designed to model time series data using an autoregressive
+    approach implemented in a tree-like structure.
+
+
+    Attributes:
+        p (int): The order of the autoregressive model.
+        u0 (float): Initial value for calculations.
+        alpha_u (float): Alpha parameter for the model.
+    """
     def __init__(self, p, u0=0, alpha_u=1):
         
         erf_temp = np.zeros([7,1])
@@ -619,11 +644,28 @@ class AutoregressiveTree:
                 return node['right']
 
 def hit_rate(ts_true, ts_pred):
+    """
+    Calculates the hit rate between true and predicted time series.
+
+    :param ts_true: The actual time series data.
+    :param ts_pred: The predicted time series data.
+    :return: The hit rate value.
+    """
     diff_true = np.diff(ts_true)
     diff_pred = np.diff(ts_pred)
     return np.sum(np.sign(diff_true) == np.sign(diff_pred)) / len(diff_true)
 
 def ART_time_series_pred(data, p, preprocessing_method, max_depth, min_size):
+    """
+    Predicts the time series using the ART model with specified parameters.
+
+    :param data: The dataset used for prediction.
+    :param p: The order of the model.
+    :param preprocessing_method: The preprocessing method to apply to the data.
+    :param max_depth: The maximum depth of the tree.
+    :param min_size: The minimum size of a node.
+    :return: Predicted time series.
+    """
     ts_train, ts_valid, ts_param = preprocessing(data, method=preprocessing_method)
     
     idx = 0
@@ -779,6 +821,16 @@ def forecast(data, tree, ART, p):
     return prediction_temp[0]
 
 class ARX_p:
+    """
+    Represents an Autoregressive model with eXogenous inputs (ARX) using a specified order 'p'.
+
+    This class is focused on modeling and forecasting time series data where
+    external factors (exogenous inputs) play a significant role.
+
+    Attributes:
+        p (int): The order of the autoregressive model.
+        data (dataframe): The data used to train the model.
+    """
     def __init__(self,  data, p):
         self.data = data
         self.p = p
@@ -786,6 +838,7 @@ class ARX_p:
         self.m = 0 
         self.coeffs = []
 
+    # define lags of the data 
     def gen_lagged_data(self, data):
         d = []
         for ind in range(data.shape[1]):
@@ -797,7 +850,7 @@ class ARX_p:
         data = np.concatenate(d, axis = 1)
         return(data)
 
-        
+    # using lagged data to train the data using least squares
     def ARX_p_model(self, start, train_len):
 
         data = self.lagged_data[start:train_len]
@@ -812,6 +865,7 @@ class ARX_p:
             residuals = np.sum((y - X.dot(coeffs))**2)
         self.m = [coeffs[0]]
     
+    # function to predict based on input data 
     def predict(self, data):
 
         d = []
@@ -824,6 +878,13 @@ class ARX_p:
         return(prediction[0])
 
 class AR_p:
+    """
+    Represents a stadard Autoregressive (AR) model using a specified order 'p'.
+
+    Attributes:
+        p (int): The order of the autoregressive model.
+        data (dataframe): The data used to train the model.
+    """
     def __init__(self,  data, p):
         self.data = data
         self.p = p
@@ -831,6 +892,7 @@ class AR_p:
         self.m = 0 
         self.coeffs = []
 
+    # define lags of the data 
     def gen_lagged_data(self, data):
         d = []
         temp_data = data[0]
@@ -841,7 +903,7 @@ class AR_p:
         data = np.concatenate(d, axis = 1)
         return(data)
 
-        
+    # using lagged data to train the data using least squares on the target variable
     def AR_p_model(self, start, train_len):
 
         data = self.lagged_data[start:train_len]
@@ -856,6 +918,7 @@ class AR_p:
             residuals = np.sum((y - X.dot(coeffs))**2)
         self.m = [coeffs[0]]
     
+    # function to predict based on input data 
     def predict(self, data):
 
         d = []
