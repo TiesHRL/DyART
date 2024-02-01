@@ -128,31 +128,38 @@ class AutoregressiveXTree:
         WN_ = W0_ + SN_d_ + ((self._alpha_u * N_) / (self._alpha_u + N_)) * np.dot(temp, temp.T)
         return WN_
     # calculating the Maximum a posteriori arameters for the ar model
-    def MAP_param(self, N, uN_, WN, q):
+    def MAP_param(self, N, uN_, WN):
         ut = ((self._alpha_u * self._u0) + (N * uN_)) / (self._alpha_u + N)
-        div = (self._alpha_W + N - (self._p + 1 + q))
+        div = (self._alpha_W + N - (self._p + 1))
         if div == 0:
             div = 0.00001
         Wt_inv = (1 / div) * WN
         return ut, Wt_inv
     def param(self, target, exog):
-        # Construct the data matrix (X) using the provided lags
-        self.test = {'tar' : target, 'exog' :exog}
-        reshaped_data = np.concatenate(exog, axis=1)
-        data = np.hstack((target, reshaped_data))
-        # Add intercept term (column of ones) to X
-        X = np.hstack([np.ones((data.shape[0], 1)), data[:, 1:]])
-        y = data[:,0]
-        self.target, self.exog = y, data
+        
+        reshaped_exog = np.array(exog)[:,:,1:].transpose(1, 0, 2).reshape(len(target), -1)
 
-        # Estimate coefficients using OLS
-        coeffs, residuals, rank, s = lstsq(X, y, rcond=None)
-        if residuals.size == 0:
-            residuals = np.sum((y - X.dot(coeffs))**2)
-        var = residuals / len(y)
-        m = [coeffs[0]]
+        data = np.concatenate([target, reshaped_exog], axis=1)
 
-        return var, coeffs[1:], m
+        N = len(data)
+        uN_ = self.sample_mean(data)
+        SN = self.scatter_matrix(data, uN_)
+        W0 = np.identity(SN.shape[0])
+        WN = self.WN_func(uN_, SN, W0, N)
+        ut, Wt_inv = self.MAP_param(N, uN_, WN)
+        W = inv(Wt_inv)
+        var = 1 / W[-1, -1]
+        Wpp = inv(Wt_inv[:-1, :-1])
+        b = np.zeros([len(data[0])-1, 1])
+        for j in range(len(b)):
+            for i in range(len(b)):
+                b[j] += Wt_inv[-1, i] * Wpp[i, j]
+        
+        m = ut[-1]
+        for i in range(self._p):
+            m += b[i] * ut[i]
+        
+        return var, b, m[0]
     # scaling function using the gamma distribution
     def c_func(self, l, alpha):
         c = 1
@@ -386,8 +393,6 @@ class AutoregressiveXTree:
                 print(node)
                 return                                                                                                                               
             print('%s[%s < %.3f]' % ((depth*' ', (node['variable']), node['value'])))
-            # print(depth)
-            # print(node)
             self.print_tree(node['right'], depth+1)
             self.print_tree(node['left'], depth+1)
     
@@ -725,20 +730,18 @@ def ART_time_series_pred(data, p, preprocessing_method, max_depth, min_size):
     else:
         d_val_cumsum = d_val[:max_len]
 
-        
     return d_val_cumsum, valid_prediction_cumsum, tree
 
 def forecast_ART(data, tree, ART, p):
-    data = data.iloc[0]
     ts_param = [np.mean(data), np.std(data)]
-    temp_data = (data - np.mean(data, axis=0)) / np.std(data, axis=0)
-    # temp_data = temp_data[0]
-    valid_window = np.array(data[-p-1:].iloc[::-1])
-    parameters = ART.predict(tree, valid_window[1:])
-    prediction = np.dot(valid_window[1:][:,np.newaxis].T,parameters[1]) + parameters[2]  
+    data = (data - np.mean(data, axis=0)) / np.std(data, axis=0)
+    valid_window = np.array(data[-p:].iloc[::-1])
+    parameters = ART.predict(tree, valid_window[:])
+    prediction = np.dot(valid_window[:][:,np.newaxis].T,parameters[1]) + parameters[2]  
     prediction_temp = prediction[0]*ts_param[1] + ts_param[0]
 
     return prediction_temp[0]
+
 def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, max_weight, splt="exog"):
     ts_train, ts_valid, ts_param = preprocessing(data, method=preprocessing_method)
     
@@ -756,27 +759,24 @@ def ARXT_time_series_pred(data, p, preprocessing_method, max_depth, min_size, ma
             if i < len(s)-(p+1):
                 temp.append(full[i:i + p + 1])
             else:
-                temp_valid.append(full[i:i + p + 1])
+                temp_valid.append(full[i:i + p])
         train.append(temp)
         valid.append(temp_valid)
     d = train[0]
     d_exog = train[1:]
-
-    comb = np.concatenate(train, axis=1)
     comb_val = np.concatenate(valid, axis=1)
 
     ARXT = AutoregressiveXTree(p, splt=splt)
     tree = ARXT.build_tree(d, d_exog, max_depth, min_size, max_weight)
-
     valid_prediction = []
-    valid_window = comb_val[p-1][1:]
+    valid_window = comb_val[p][:]
 
     for i in range(len(comb_val)):
         if i >= p:
             parameters = ARXT.predict(tree, valid_window)
             prediction_temp = np.dot(valid_window[:,np.newaxis].T,parameters[1]) + parameters[2]
             valid_prediction.append(prediction_temp[0])
-        valid_window = comb_val[i][1:]
+        valid_window = comb_val[i][:]
     if preprocessing_method == 'differencing':
         valid_prediction = pd.Series(valid_prediction[:max_len], copy=True)
         train_s = pd.Series(ts_train[idx], copy=True).cumsum()
@@ -813,10 +813,10 @@ def forecast(data, tree, ART, p):
     d = []
     for ind in range(temp_data.shape[1]):
         full = temp_data[ind]
-        d.append(full[-p-1:].iloc[::-1])
+        d.append(full[-p:].iloc[::-1])
     for_val = np.concatenate(d)
-    parameters = ART.predict(tree, for_val[1:])
-    prediction = np.dot(for_val[1:][:,np.newaxis].T,parameters[1]) + parameters[2]  
+    parameters = ART.predict(tree, for_val[:])
+    prediction = np.dot(for_val[:][:,np.newaxis].T,parameters[1]) + parameters[2]  
     prediction_temp = prediction[0]*ts_param[1] + ts_param[0]
     return prediction_temp[0]
 

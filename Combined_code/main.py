@@ -27,12 +27,9 @@ def get_data(differencing = False):
     data = data.iloc[1:,:]
 
     data.columns = range(data.shape[1])
-    if differencing:
-        data = data.diff()
-        data = data.iloc[1:,:]
-
-    else:
+    if not differencing:
         data = pd.DataFrame(np.log1p(data))
+
     data = data*100
 
     return(data)
@@ -168,7 +165,7 @@ def ART_tree(tune, train, data):
 
     forecasts = []
     for i in range(train_len, len(data[0])):
-        forecasts.append(ARXT.forecast_ART(data.iloc[i-1000:i], tree, ART, p))
+        forecasts.append(ARXT.forecast_ART(data.iloc[i-p-1:i,0], tree, ART, p))
         if CPD.update(i-train_len+1, data.iloc[i, 0]):
             if tune:
                 print("retuning at ", data.index[i])
@@ -314,27 +311,33 @@ def main():
 
     The function does not take any parameters and does not return any values. It primarily serves to orchestrate the forecasting workflow.
     """
-    differencing = False
+    differencing = True
     data = get_data(differencing=differencing)
     print(data)
 
-    # Calling various forecasting functions with different configurations
-    # ARXT_exog_tuned = ARXT_tree("exog", True, True, data)
-    # ARXT_exog_trained = ARXT_tree("exog", False, True, data)
-    # ARXT_exog = ARXT_tree("exog", False, False, data)
-    # ARXT_target_tuned = ARXT_tree("target", True, True, data)
-    # ARXT_target_trained = ARXT_tree("target", False, True, data)
-    # ARXT_target = ARXT_tree("target", False, False, data)
+    # # Calling various forecasting functions with different configurations
+    ARXT_exog_tuned = ARXT_tree("exog", True, True, data)
+    ARXT_exog_trained = ARXT_tree("exog", False, True, data)
+    ARXT_exog = ARXT_tree("exog", False, False, data)
+    ARXT_target_tuned = ARXT_tree("target", True, True, data)
+    ARXT_target_trained = ARXT_tree("target", False, True, data)
+    ARXT_target = ARXT_tree("target", False, False, data)
     ART_tuned = ART_tree(True, True, data)
-    # ART_trained = ART_tree(False, True, data)
-    # ART = ART_tree(False, False, data)
-    # ARX_p_trained =  ARX_model(5, True, data)
-    # ARX_p =  ARX_model(5, False, data)
-    # AR_p =  AR_model(5, data)
+    ART_trained = ART_tree(False, True, data)
+    ART = ART_tree(False, False, data)
+    ARX_p_trained =  ARX_model(5, True, data)
+    ARX_p =  ARX_model(5, False, data)
+    AR_p =  AR_model(5, data)
     
     if differencing: prep_met = "diff"
     else: prep_met = "norm"
-    # pd.DataFrame([ARXT_exog_tuned, ARXT_exog_trained, ARXT_exog, ARXT_target_tuned, ARXT_target_trained, ARXT_target, ART_tuned, ART_trained, ART, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
+    pd.DataFrame([ARXT_exog_tuned, ARXT_exog_trained, ARXT_exog, ARXT_target_tuned, ARXT_target_trained, ARXT_target, ART_tuned, ART_trained, ART, ARX_p_trained, ARX_p, AR_p]).to_csv(f"Data\\results_{prep_met}.csv")
+    
+    # import matplotlib.pyplot as plt
 
+    # plt.plot(data.iloc[1000:,0], label="truth")
+    # plt.plot(ARXT_exog_trained, label="ARX_p_trained")
+    # plt.legend()
+    # plt.show()
 if __name__ == "__main__":
     main()
